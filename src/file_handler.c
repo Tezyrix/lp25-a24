@@ -1,92 +1,106 @@
+#include "file_handler.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <unistd.h>
-#include "file_handler.h"
+#include <time.h>
 
-/**
- * @brief Liste les fichiers et dossiers présents dans un répertoire.
- *
- * @param path Chemin du répertoire à explorer.
- */
+// Fonction permettant de lire un fichier de log existant
+log_t read_backup_log(const char *logfile) {
+    log_t logs = {NULL, NULL};
+    FILE *file = fopen(logfile, "r");
+    if (!file) {
+        perror("Erreur lors de l'ouverture du fichier log");
+        return logs;
+    }
+
+    char path[256], date[64];
+    unsigned char md5[MD5_DIGEST_LENGTH];
+    while (fscanf(file, "%s %s %32s", path, date, md5) == 3) {
+        log_element *new_element = malloc(sizeof(log_element));
+        if (!new_element) {
+            perror("Erreur d'allocation mémoire");
+            fclose(file);
+            return logs;
+        }
+
+        new_element->path = strdup(path);
+        new_element->date = strdup(date);
+        memcpy(new_element->md5, md5, MD5_DIGEST_LENGTH);
+        new_element->next = NULL;
+
+        if (!logs.head) {
+            logs.head = logs.tail = new_element;
+            new_element->prev = NULL;
+        } else {
+            logs.tail->next = new_element;
+            new_element->prev = logs.tail;
+            logs.tail = new_element;
+        }
+    }
+
+    fclose(file);
+    return logs;
+}
+
+// Fonction permettant de mettre à jour le fichier de log
+void update_backup_log(const char *logfile, log_t *logs) {
+    FILE *file = fopen(logfile, "w");
+    if (!file) {
+        perror("Erreur lors de l'ouverture du fichier log en écriture");
+        return;
+    }
+
+    log_element *current = logs->head;
+    while (current) {
+        write_log_element(current, file);
+        current = current->next;
+    }
+
+    fclose(file);
+}
+
+// Fonction pour écrire un élément de log dans le fichier
+void write_log_element(log_element *elt, FILE *file) {
+    fprintf(file, "%s %s %32s\n", elt->path, elt->date, elt->md5);
+}
+
+// Fonction pour lister les fichiers dans un répertoire
 void list_files(const char *path) {
-    struct dirent *entry;
     DIR *dir = opendir(path);
-
-    if (dir == NULL) {
+    if (!dir) {
         perror("Erreur lors de l'ouverture du répertoire");
         return;
     }
 
-    printf("Contenu du répertoire %s :\n", path);
+    struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        printf("- %s\n", entry->d_name);
+        if (entry->d_type == DT_REG) {
+            printf("%s/%s\n", path, entry->d_name);
+        }
     }
 
     closedir(dir);
 }
 
-/**
- * @brief Lit le contenu d'un fichier.
- *
- * @param filepath Chemin du fichier à lire.
- * @param size Pointeur pour stocker la taille du fichier lu.
- * @return char* Contenu du fichier (à libérer après utilisation).
- */
-char *read_file(const char *filepath, size_t *size) {
-    FILE *file = fopen(filepath, "rb");
-    if (file == NULL) {
-        perror("Erreur lors de l'ouverture du fichier");
-        return NULL;
-    }
-
-    // Se positionner à la fin du fichier pour obtenir sa taille
-    fseek(file, 0, SEEK_END);
-    *size = ftell(file);
-    rewind(file);
-
-    // Allouer de la mémoire pour lire le contenu du fichier
-    char *buffer = malloc(*size);
-    if (buffer == NULL) {
-        perror("Erreur d'allocation de mémoire");
-        fclose(file);
-        return NULL;
-    }
-
-    // Lire le contenu du fichier
-    size_t read_size = fread(buffer, 1, *size, file);
-    if (read_size != *size) {
-        perror("Erreur lors de la lecture du fichier");
-        free(buffer);
-        fclose(file);
-        return NULL;
-    }
-
-    fclose(file);
-    return buffer;
-}
-
-/**
- * @brief Écrit des données dans un fichier.
- *
- * @param filepath Chemin du fichier à écrire.
- * @param data Données à écrire.
- * @param size Taille des données à écrire.
- */
-void write_file(const char *filepath, const void *data, size_t size) {
-    FILE *file = fopen(filepath, "wb");
-    if (file == NULL) {
-        perror("Erreur lors de l'ouverture du fichier pour écriture");
+// Fonction pour copier un fichier
+void copy_file(const char *src, const char *dest) {
+    FILE *src_file = fopen(src, "rb");
+    FILE *dest_file = fopen(dest, "wb");
+    if (!src_file || !dest_file) {
+        perror("Erreur d'ouverture de fichier");
+        if (src_file) fclose(src_file);
+        if (dest_file) fclose(dest_file);
         return;
     }
 
-    // Écrire les données dans le fichier
-    size_t written_size = fwrite(data, 1, size, file);
-    if (written_size != size) {
-        perror("Erreur lors de l'écriture des données dans le fichier");
+    char buffer[4096];
+    size_t bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src_file)) > 0) {
+        fwrite(buffer, 1, bytes, dest_file);
     }
 
-    fclose(file);
+    fclose(src_file);
+    fclose(dest_file);
 }
