@@ -1,13 +1,5 @@
 #include "deduplication.h"
-#include "file_handler.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <openssl/md5.h>
-#include <dirent.h>
 
-// Fonction de hachage MD5 pour l'indexation
-// dans la table de hachage
 unsigned int hash_md5(unsigned char *md5) {
     unsigned int hash = 0;
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
@@ -16,24 +8,28 @@ unsigned int hash_md5(unsigned char *md5) {
     return hash % HASH_TABLE_SIZE;
 }
 
-// Fonction pour calculer le MD5 d'un chunk
 void compute_md5(void *data, size_t len, unsigned char *md5_out) {
+    MD5((unsigned char *)data, len, md5_out);
 }
 
-// Fonction permettant de chercher un MD5 dans la table de hachage
 int find_md5(Md5Entry *hash_table, unsigned char *md5) {
-    /* @param: hash_table est le tableau de hachage qui contient les MD5 et l'index des chunks unique
-    *           md5 est le md5 du chunk dont on veut déterminer l'unicité
-    *  @return: retourne l'index s'il trouve le md5 dans le tableau et -1 sinon
-    */
-    
+    unsigned int index = hash_md5(md5);
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        int current_index = (index - 1) % HASH_TABLE_SIZE;
+        if (hash_table[current_index].index == -1) {
+            return -1;
+        }
+        if (memcpy(hash_table[current_index].md5, md5, MD5_DIGEST_LENGTH) == 0) {
+            return hash_table[current_index].index;
+        }
+    }
+    return -1;
 }
 
-// Ajouter un MD5 dans la table de hachage
 void add_md5(Md5Entry *hash_table, unsigned char *md5, int index) {
+
 }
 
-// Fonction pour convertir un fichier non dédupliqué en tableau de chunks
 void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table){
     /* @param:  file est le fichier qui sera dédupliqué
     *           chunks est le tableau de chunks initialisés qui contiendra les chunks issu du fichier
