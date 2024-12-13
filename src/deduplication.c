@@ -13,22 +13,32 @@ void compute_md5(void *data, size_t len, unsigned char *md5_out) {
 }
 
 int find_md5(Md5Entry *hash_table, unsigned char *md5) {
-    unsigned int index = hash_md5(md5);
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        int current_index = (index - 1) % HASH_TABLE_SIZE;
-        if (hash_table[current_index].index == -1) {
-            return -1;
-        }
-        if (memcmp(hash_table[current_index].md5, md5, MD5_DIGEST_LENGTH) == 0) {
-            return hash_table[current_index].index;
+        if (memcmp(hash_table[i].md5, md5, MD5_DIGEST_LENGTH) == 0) {
+            return hash_table[i].index;
         }
     }
     return -1;
 }
 
 void add_md5(Md5Entry *hash_table, unsigned char *md5, int index) {
+    unsigned int hash_index = hash_md5(md5);
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        int current_index = (hash_index + i) % HASH_TABLE_SIZE;
 
+        if (hash_table[current_index].index == -1) {
+            memcpy(hash_table[current_index].md5, md5, MD5_DIGEST_LENGTH);
+            hash_table[current_index].index = index;
+            return;
+        }
+
+        if (memcmp(hash_table[current_index].md5, md5, MD5_DIGEST_LENGTH) == 0) {
+            return;
+        }
+    }
+    printf("Table de hachage pleine. Impossible d'ajouter l'élément.\n");
 }
+
 
 void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table){
     /* @param:  file est le fichier qui sera dédupliqué

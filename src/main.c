@@ -80,13 +80,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Suggestion pour remplacer les 3 'if' ci-dessus:
-    if ((restore_flag || list_flag) || (backup_flag || list_flag) || (backup_flag && restore_flag)) {
-        fprintf(stderr, "Erreur: --list-backups, --backup et --restore ne peuvent pas être utilisés ensembles\n");
-        return EXIT_FAILURE;
-    }
-    */
-
     if (!source_dir || !dest_dir) {
         fprintf(stderr, "Erreur: Les options --source et --dest sont obligatoires\n");
         return EXIT_FAILURE;
