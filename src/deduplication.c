@@ -19,7 +19,7 @@ int find_md5(Md5Entry *hash_table, unsigned char *md5) {
         if (hash_table[current_index].index == -1) {
             return -1;
         }
-        if (memcpy(hash_table[current_index].md5, md5, MD5_DIGEST_LENGTH) == 0) {
+        if (memcmp(hash_table[current_index].md5, md5, MD5_DIGEST_LENGTH) == 0) {
             return hash_table[current_index].index;
         }
     }
