@@ -109,3 +109,49 @@ void copy_file(const char *src, const char *dest) {
     fclose(src_file);
     fclose(dest_file);
 }
+
+// Fonction pour comparer un fichier avec le contenu d'un backup_log
+int compare_file_with_backup_log(const char *path, log_t *logs) {
+    struct stat file_stat;
+    unsigned char file_md5[MD5_DIGEST_LENGTH];
+    log_element *current = logs->head;
+
+    if (stat(path, &file_stat) != 0) {
+        fprintf(stderr, "Erreur : Impossible d'obtenir les informations du fichier %s\n", path);
+        return 0; // Échec si le fichier n'existe pas
+    }
+
+    if (!compute_md5(path, file_md5)) {
+        fprintf(stderr, "Erreur : Impossible de calculer le MD5 pour le fichier %s\n", path);
+        return 0; // Échec si le MD5 ne peut pas être calculé
+    }
+
+    while (current) {
+        if (strcmp(current->path, path) == 0) {
+
+            if (strcmp(current->date, ctime(&file_stat.st_mtime)) != 0) {
+                return 1; // Succès : date de modification différente
+            }
+
+            if (memcmp(current->md5, file_md5, MD5_DIGEST_LENGTH) != 0) {
+                return 1; // Succès : MD5 différent
+            }
+
+            return 0; // Échec : fichier identique
+        }
+        current = current->next;
+    }
+
+    return 1; // Succès : fichier n'existe pas dans le backup_log
+}
+
+
+
+
+
+
+
+
+
+
+
