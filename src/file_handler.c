@@ -149,7 +149,10 @@ int compare_file_with_backup_log(const char *path, log_t *logs) {
 //-la date de modification est postérieure dans la source et le contenu est différent 
 //- la taille est différente et le contenu est différent
 
-// en gros ca serait bien si ta fonction : teste si c'est un fichier ou un dossier, si c'est un dossier, tu regardes si il existe dans le log,
-// si oui tu renvoie 0 si non tu l'ajoutes dans le log sous le format backup_name/path (backup_name que je te donne en parametre) et tu renvoie 1
-//si c'est un fichier, tu regardes si il existe dans le log, si non, tu l'ajoutes dans le log sous le format backup_name/path/mtime/md5 (t'as un fonction pour calculer le md5 d'un fichier) et tu renvoie 1
-//si non tu regardes d'abord si on doit le sauvegarder selon les critères plus haut, si non tu renvoie 0 si oui tu l'ajoute au log selon le format et tu renvoie 1 (tu peux utiliser ta fonction plus haut)
+// en gros ca serait bien si ta fonction : teste si c'est un fichier ou un dossier, 
+// si c'est un dossier: tu regardes si il existe dans le log,
+// si oui tu renvoie 0, si non tu l'ajoutes dans le log sous le format backup_name/path (backup_name que je te donne en parametre) et tu renvoie 1
+// si c'est un fichier: tu regardes si il existe dans le log,
+// si non, tu l'ajoutes dans le log sous le format backup_name/path/mtime/md5 (t'as un fonction pour calculer le md5 d'un fichier) et tu renvoie 1
+// si oui tu regardes d'abord si on doit le sauvegarder selon les critères plus haut, si non tu renvoie 0, si oui tu l'ajoute au log selon le format et tu renvoie 1 (tu peux utiliser ta fonction plus haut)
+// en gros tu renvoie 0 si je dois pas toucher au fichier, 1 si je dois le backup

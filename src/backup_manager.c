@@ -25,8 +25,15 @@ void create_backup(const char *source_dir, const char *backup_dir){
     } else {
         // Si une sauvegarde existe déjà, effectuer une sauvegarde incrémentale
         printf("Backup trouvé, on effectue une sauvegarde incrémentale\n", backup_dir);
-        // Appeler la fonction pour effectuer une sauvegarde incrémentale ici
-        // incr_backup(source_dir, backup_dir);  // La fonction incrémentale sera implémentée plus tard
+        // Générer le nom du répertoire pour la sauvegarde incrémentale
+        char incremental_backup_name[256];
+        generate_backup_name(incremental_backup_name);
+
+        // Créer un répertoire pour la sauvegarde incrémentale
+        char incremental_backup_path[512];
+        snprintf(incremental_backup_path, sizeof(incremental_backup_path), "%s/%s", backup_dir, incremental_backup_name);
+        mkdir(incremental_backup_path, 0755);
+        
     }
 }
 
