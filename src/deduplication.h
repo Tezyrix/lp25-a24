@@ -40,7 +40,7 @@ void compute_md5(void *data, size_t len, unsigned char *md5_out);
 /**
  @brief: Fonction permettant de chercher un MD5 dans la table de hachage
  @param hash_table: Tableau de hachage qui contient les MD5 et l'index des chunks unique
- md5 est le md5 du chunk dont on veut déterminer l'unicité
+ @param md5: MD5 du chunk dont on veut déterminer l'unicité
  @return: Retourne l'index s'il trouve le md5 dans le tableau et -1 sinon
  */
 int find_md5(Md5Entry *hash_table, unsigned char *md5);
@@ -52,12 +52,18 @@ void add_md5(Md5Entry *hash_table, unsigned char *md5, int index);
 
 /**
  @brief: Fonction pour convertir un fichier non dédupliqué en tableau de chunks
+ @param file: Fichier qui sera dédupliqué
+ @param chunks: Tableau de chunks initialisés qui contiendra les chunks issu du fichier
+ @param hash_table: Tableau de hachage qui contient les MD5 et l'index des chunks unique
  */
 void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table);
 
 /**
  @brief: Fonction permettant de charger un fichier dédupliqué en table de chunks
  en remplaçant les références par les données correspondantes
+ @param file: Nom du fichier dédupliqué présent dans le répertoire de sauvegarde
+ @param chunks Représente le tableau de chunk qui contiendra les chunks restauré depuis filename
+ @param chunk_count Compteur du nombre de chunk restauré depuis le fichier filename
  */
 void undeduplicate_file(FILE *file, Chunk **chunks, int *chunk_count);
 
