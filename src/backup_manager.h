@@ -23,6 +23,12 @@ void restore_backup(const char *backup_id, const char *restore_dir);
 void write_restored_file(const char *output_filename, Chunk *chunks, int chunk_count);
 // Fonction permettant de lister les différentes sauvegardes présentes dans la destination
 void list_backups(const char *backup_dir);
+// Fonction pour vérifier si une sauvegarde existe dans le répertoire donné
+int check_if_backup_exist(const char *backup_dir);
+// Fonction pour générer le nom du directory backup
+void generate_backup_name(char *backup_name);
+// Fonction permettant de faire une copie complète par lien dur
+void full_backup(const char *source_dir, const char *backup_dir);
 
 #endif // BACKUP_MANAGER_H
 

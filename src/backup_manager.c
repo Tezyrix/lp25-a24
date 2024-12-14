@@ -9,28 +9,64 @@
 #include <sys/stat.h>
 #include <regex.h>
 
+// global_hash_table HASH_TABLE_SIZE à faire
+
 // Fonction pour créer une nouvelle sauvegarde complète puis incrémentale
 void create_backup(const char *source_dir, const char *backup_dir) {
-    /* @param: source_dir est le chemin vers le répertoire à sauvegarder
-    *          backup_dir est le chemin vers le répertoire de sauvegarde
-    */
+    /**  
+     * @param source_dir est le chemin vers le répertoire à sauvegarder
+     * @param backup_dir est le chemin vers le répertoire de sauvegarde
+     */
 }
 
-// Fonction permettant d'enregistrer dans fichier le tableau de chunk dédupliqué
-void write_backup_file(const char *output_filename, Chunk *chunks, int chunk_count) {
+// Fonction permettant d'enregistrer dans fichier le tableau de chunk dédupliqué  
+int write_backup_file(const char *output_filename, Chunk *chunks, int chunk_count) {
 
+    /**  
+     * @param output_filename est le fichier dans lequel on va sauvegarder
+     * @param chunks est le tableau de chunk issu de deduplicate
+     * @param chunk_count est le nombre de chunk du fichier
+     */
+
+
+    // Ouvrir le fichier de sauvegarde en écriture binaire
+    FILE *output_file = fopen(output_filename, "wb");
+
+    if (!output_file) {
+        return 1;
+    }
+
+    // Parcourir chaque chunk et écrire son index dans le fichier
+    for (int i=0; i<chunk_count; i++) {
+        unsigned char *md5=chunks[i].md5;
+
+        // Chercher l'indice dans la table de hashage globale
+        int index=find_md5(global_hash_table, md5);
+
+        // Écrire l'indice dans le fichier, suivi d'un saut de ligne (plus facile pour le restore)
+        if (fprintf(output_file, "%d\n", index) < 0) {
+            fclose(output_file);
+            return 1;
+        }
+    fclose(output_file);
+    return 0;
+    }
 }
 
 
-// Fonction implémentant la logique pour la sauvegarde d'un fichier
+// Fonction implémentant la logique pour la sauvegarde d'un fichier         
 void backup_file(const char *filename) {
+    /**
+     * @param filename est le nom du fichier à sauvegarder
+     */
+
     FILE *file = fopen(filename, "rb");
     if (!file) {
         perror("Error opening file for reading");
         return;
     }
 
-    // Initialisation du tableau de chunk propre à chaque fichier
+    // Initalisation du tableau de chunk
     Chunk *chunks = malloc(sizeof(Chunk) * HASH_TABLE_SIZE);
     if (!chunks) {
         perror("Erreur d'allocation mémoire");
@@ -38,45 +74,49 @@ void backup_file(const char *filename) {
         return;
     }
 
-    // Initialiser une table de hachage pour stocker les MD5 des chunks uniques
-    Md5Entry hash_table[HASH_TABLE_SIZE] = {0};
-
-    // Dédupliquer le fichier
     int chunk_count = 0;
-    deduplicate_file(file, chunks, hash_table, &chunk_count);
-
+    deduplicate_file(file, chunks, &chunk_count); // Le tableau de chunk contiendra tous les chunks du fichier (tableau temporaire local)
     fclose(file);
 
-    // Générer un nom de fichier de sauvegarde avec snprintf en .backup
+    // Créer le nom du fichier de sauvegarde
     char backup_filename[512];
     snprintf(backup_filename, sizeof(backup_filename), "%s.backup", filename);
 
-    // Écrire le fichier de sauvegarde
-    write_backup_file(backup_filename, chunks, chunk_count);
+    // Écriture dans le fichier de sauvegarde des indices des chunks
+    if (write_backup_file(backup_filename, chunks, chunk_count) != 0) {
+        fprintf(stderr, "Erreur dans la génération du fichier %s\n", backup_filename);
+        // Free chunks si erreur
+        for (int i=0; i<chunk_count; i++) {
+            free(chunks[i].data);
+        }
+        free(chunks);
+        return;
+    }
 
-    // Récupérer la date et les droits du file avec stat
+    // Obtenir les informations du fichier source
     struct stat file_stat;
     if (stat(filename, &file_stat) == 0) {
-        // Modifier les droits d'accès du fichier de sauvegarde
-        chmod(backup_filename, file_stat.st_mode);
-
-        // Récupérer les dates d'accès et de modif du file et les stocker dans une nouvelle struct
-        struct utimbuf new_times;
-        new_times.actime = file_stat.st_atime;  // heure d'accès
-        new_times.modtime = file_stat.st_mtime; // heure de modification
-        utime(backup_filename, &new_times); // utime pour modifier ces dates
+        // Modifier les permissions du fichier backup
+        if (chmod(backup_filename, file_stat.st_mode) != 0) {
+            perror("Erreur de permissions");
+        }
+        // Modifier les dates d'accès et de modification
+        struct utimbuf new_times;               // Struct utimbuf utilisé pour les timestamps
+        new_times.actime = file_stat.st_atime;  // Heure d'accès
+        new_times.modtime = file_stat.st_mtime; // Heure de modification
+        utime(backup_filename, &new_times);
     } else {
-        perror("Erreur dans la récupération des informations du fichier");
+        perror("Pas accès aux informations du fichier");
     }
 
-    // free chaque data dans le tableau de chunk
-    for (int i = 0; i < chunk_count; i++) {
-        free(chunks[i].data); // Libérer les données de chaque chunk
+    // Free chunks
+    for (int i=0; i<chunk_count; i++) {
+        free(chunks[i].data); 
     }
     free(chunks);
-
-    printf("Backup faite pour: %s\n", filename);
+    printf("%s done\n", filename);
 }
+
 
 
 // Fonction permettant la restauration du fichier backup via le tableau de chunk
@@ -92,8 +132,12 @@ void restore_backup(const char *backup_id, const char *restore_dir) {
     */
 }
 
-// Fonction permettant de lister les différentes sauvegardes présentes dans la destination
+// Fonction permettant de lister les différentes sauvegardes présentes dans la destination 
 void list_backups(const char *backup_dir){
+    /**
+     * @param backup_dir dossier dans lequel on liste les backups
+     */
+
     DIR *dir = opendir(backup_dir);
     if (!dir) {
         perror("opendir");
@@ -122,7 +166,106 @@ void list_backups(const char *backup_dir){
             }
         }
     }
-
     regfree(&regex); // On libère la mémoire venant du regcomp
     closedir(dir);
+}
+
+// Fonction pour vérifier si une sauvegarde existe dans le répertoire donné            
+int check_if_backup_exist(const char *backup_dir) {
+    /**
+     * @param backup_dir dossier dans lequel on cherche s'il existe une backup
+     */
+
+    DIR *dir = opendir(backup_dir);
+    if (!dir) {
+        perror("opendir");
+        return 0;
+    }
+    struct dirent *entry;
+    regex_t regex;
+
+    // Compile la regex au format pour qu'elle soit utilisable
+    if (regcomp(&regex, "^\\d{4}-\\d{2}-\\d{2}-\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$", REG_EXTENDED) != 0) {
+        perror("La regex n'a pas pu être compilée");
+        closedir(dir);
+        return 0;
+    }
+
+    // Parcours des fichiers dans le répertoire
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignorer les fichiers commencant par . (sécurité)
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        // Vérifier si c'est un répertoire et si son nom correspond à la regex
+        if (entry->d_type == DT_DIR) {
+            if (regexec(&regex, entry->d_name, 0, NULL, 0) == 0) {
+                regfree(&regex); // Free la regex venant de regcomp
+                closedir(dir);   
+                return 1;        // Succès
+            }
+        }
+    }
+    regfree(&regex); // Libérer la mémoire de la regex
+    closedir(dir);   // Fermer le répertoire
+    return 0;        // Aucune sauvegarde trouvée, retour 0
+}
+
+
+// Fonction pour générer le nom du directory backup  
+void generate_backup_name(char *backup_name) {
+    /**
+     * @param backup_name chaine de caractère vide dans lequel on va stocker le nom de la backup
+     */
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);                    // Récupérer le temps actuel puis on le formate avec localtime
+    struct tm *tm_info = localtime(&tv.tv_sec); // On traite les millisecondes à part en utilisant la structure tm
+
+    // Formater le nom de la sauvegarde avec la date et l'heure
+    strftime(backup_name, 20, "%Y-%m-%d-%H:%M:%S", tm_info);
+
+    // Ajouter les millisecondes
+    snprintf(backup_name + 19, 5, ".%03ld", tv.tv_usec / 1000); // tv_usec est en microsecondes, donc on divise par 1000 pour obtenir les millisecondes
+}
+
+
+// Fonction permettant de faire une copie complète par lien dur
+void full_backup(const char *source_dir, const char *backup_dir) {
+    /**
+     * @param source_dir source à copier
+     * @param backup_dir dossier dans lequel on va copier
+     */
+
+    char backup_name[256];
+    generate_backup_name(backup_name); // Générer le nom de la backup
+
+    // Créer le répertoire de sauvegarde dans backup_dir
+    char backup_path[512];
+    snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, backup_name);
+    mkdir(backup_path, 0755); // Umask classique   rwxr-xr-x
+
+    DIR *source = opendir(source_dir);
+
+    struct dirent *entry;
+    while ((entry = readdir(source)) != NULL) {
+        if (entry->d_name[0] == '.') { // Ignorer les 
+            continue;
+        }
+        char source_path[512], backup_file_path[512];
+        snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_path, entry->d_name);
+
+        // Vérification du type de fichier avec d_type
+        if (entry->d_type == DT_DIR) {
+            // Si c'est un répertoire, on crée un répertoire de sauvegarde
+            mkdir(backup_file_path, 0755); 
+            // Procédé de récursivité cas particulier 
+            create_backup(source_path, backup_file_path);
+        } else if (entry->d_type == DT_REG) {
+            // Sinon cas général, c'est un fichier on fait un lien dur
+            link(source_path, backup_file_path);
+        }
+    }
+    closedir(source);
 }

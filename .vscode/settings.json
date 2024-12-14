@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.sqlite": "sqlite",
+        "backup_manager.h": "c"
+    }
+}
