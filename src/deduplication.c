@@ -36,7 +36,7 @@ void add_md5(Md5Entry *hash_table, unsigned char *md5, int index) {
             return;
         }
     }
-    printf("Table de hachage pleine. Impossible d'ajouter l'élément.\n");
+    printf("Table de hachage pleine. Impossible d'ajouter une nouvelle entrée.\n");
 }
 
 void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table) {
@@ -49,7 +49,6 @@ void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table) {
         compute_md5(buffer, bytes_read, md5);
 
         if (find_md5(hash_table, md5) == -1) {
-            // Nouveau chunk
             chunks[chunk_index].data = malloc(bytes_read);
             memcpy(chunks[chunk_index].data, buffer, bytes_read);
             memcpy(chunks[chunk_index].md5, md5, MD5_DIGEST_LENGTH);
