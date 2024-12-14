@@ -39,20 +39,41 @@ void add_md5(Md5Entry *hash_table, unsigned char *md5, int index) {
     printf("Table de hachage pleine. Impossible d'ajouter l'élément.\n");
 }
 
+void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table) {
+    unsigned char buffer[CHUNK_SIZE];
+    size_t bytes_read;
+    int chunk_index = 0;
 
-void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table){
-    /* @param:  file est le fichier qui sera dédupliqué
-    *           chunks est le tableau de chunks initialisés qui contiendra les chunks issu du fichier
-    *           hash_table est le tableau de hachage qui contient les MD5 et l'index des chunks unique
-    */
+    while ((bytes_read = fread(buffer, 1, CHUNK_SIZE, file)) > 0) {
+        unsigned char md5[MD5_DIGEST_LENGTH];
+        compute_md5(buffer, bytes_read, md5);
+
+        if (find_md5(hash_table, md5) == -1) {
+            // Nouveau chunk
+            chunks[chunk_index].data = malloc(bytes_read);
+            memcpy(chunks[chunk_index].data, buffer, bytes_read);
+            memcpy(chunks[chunk_index].md5, md5, MD5_DIGEST_LENGTH);
+            add_md5(hash_table, md5, chunk_index);
+            chunk_index++;
+        }
+    }
 }
 
-
-// Fonction permettant de charger un fichier dédupliqué en table de chunks
-// en remplaçant les références par les données correspondantes
 void undeduplicate_file(FILE *file, Chunk **chunks, int *chunk_count) {
-    /* @param: file est le nom du fichier dédupliqué présent dans le répertoire de sauvegarde
-    *           chunks représente le tableau de chunk qui contiendra les chunks restauré depuis filename
-    *           chunk_count est un compteur du nombre de chunk restauré depuis le fichier filename
-    */
+    fread(chunk_count, sizeof(int), 1, file);
+    *chunks = (Chunk *)malloc(sizeof(Chunk) * (*chunk_count));
+
+    for (int i = 0; i < *chunk_count; i++) {
+        fread((*chunks)[i].md5, MD5_DIGEST_LENGTH, 1, file);
+
+        size_t data_size;
+        fread(&data_size, sizeof(size_t), 1, file);
+
+        if (data_size > 0) {
+            (*chunks)[i].data = malloc(data_size);
+            fread((*chunks)[i].data, data_size, 1, file);
+        } else {
+            (*chunks)[i].data = NULL; // Chunk référencé uniquement par MD5
+        }
+    }
 }
