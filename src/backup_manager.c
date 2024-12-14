@@ -33,8 +33,14 @@ void create_backup(const char *source_dir, const char *backup_dir){
         char incremental_backup_path[512];
         snprintf(incremental_backup_path, sizeof(incremental_backup_path), "%s/%s", backup_dir, incremental_backup_name);
         mkdir(incremental_backup_path, 0755);
-        
-    }
+
+        // Les logs sont déjà supposés être présents dans le répertoire de sauvegarde sous le nom backup_dir.backup_log
+        char log_file[512];
+        snprintf(log_file, sizeof(log_file), "%s/%s.backup_log", backup_dir, backup_dir);
+
+        // Effectuer une sauvegarde incrémentale
+        incremental_backup(source_dir, incremental_backup_path, log_file);
+        }
 }
 
 // Fonction permettant d'enregistrer dans fichier le tableau de chunk dédupliqué  
@@ -66,9 +72,9 @@ int write_backup_file(const char *output_filename, Chunk *chunks, int chunk_coun
             fclose(output_file);
             return 1;
         }
+    }
     fclose(output_file);
     return 0;
-    }
 }
 
 
@@ -93,7 +99,7 @@ void backup_file(const char *filename) {
     }
 
     int chunk_count = 0;
-    deduplicate_file(file, chunks, &chunk_count); // Le tableau de chunk contiendra tous les chunks du fichier (tableau temporaire local)
+    deduplicate_file(file, chunks, &chunk_count); // Le tableau de chunk contiendra tous les chunks du fichier (tableau temporaire local) data et md5
     fclose(file);
 
     // Créer le nom du fichier de sauvegarde
@@ -340,4 +346,54 @@ void generate_backup_log(const char *source_dir, const char *backup_name, const 
     // Fermer le fichier log et le répertoire
     fclose(log);
     closedir(dir);
+}
+
+void incremental_backup(const char *source_dir, const char *backup_dir, log_t *logs) {
+    DIR *source = opendir(source_dir);
+    if (!source) {
+        perror("Erreur d'ouverture du répertoire source");
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(source)) != NULL) {
+        // Ignorer les fichiers et répertoires cachés
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+
+        char source_path[512], backup_file_path[512];
+        snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_dir, entry->d_name);
+
+        struct stat file_stat;
+        stat(source_path, &file_stat);
+
+        // Vérifier si c'est un fichier ou un répertoire
+        if (S_ISDIR(file_stat.st_mode)) {
+            // Si c'est un répertoire, on compare avec les logs
+            if (compare_file_with_backup_log(source_path, logs)) {
+                mkdir(backup_file_path, 0755); // Le répertoire est nouveau
+            }
+            // Traiter récursivement le sous-répertoire
+            incremental_backup(source_path, backup_file_path, logs);
+        } else if (S_ISREG(file_stat.st_mode)) {
+            // Si c'est un fichier, on compare avec les logs
+            if (compare_file_with_backup_log(source_path, logs))
+            {
+                // Si le fichier a changé ou est nouveau, on le sauvegarde
+                backup_file(source_path); // Sauvegarde le fichier en créant un fichier de backup
+
+                // Déplacer le fichier de sauvegarde dans le répertoire de sauvegarde
+                char backup_file_name[512];
+                snprintf(backup_file_name, sizeof(backup_file_name), "%s/%s", backup_dir, entry->d_name);
+                if (rename(source_path, backup_file_name) != 0) {
+                    perror("Erreur lors du déplacement du fichier de sauvegarde");
+                } else {
+                    printf("Fichier sauvegardé et déplacé : %s\n", backup_file_name);
+                }
+            }
+        }
+    }
+    closedir(source);
 }

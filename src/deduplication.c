@@ -40,22 +40,7 @@ void add_md5(Md5Entry *hash_table, unsigned char *md5, int index) {
 }
 
 void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table) {
-    unsigned char buffer[CHUNK_SIZE];
-    size_t bytes_read;
-    int chunk_index = 0;
 
-    while ((bytes_read = fread(buffer, 1, CHUNK_SIZE, file)) > 0) {
-        unsigned char md5[MD5_DIGEST_LENGTH];
-        compute_md5(buffer, bytes_read, md5);
-
-        if (find_md5(hash_table, md5) == -1) {
-            chunks[chunk_index].data = malloc(bytes_read);
-            memcpy(chunks[chunk_index].data, buffer, bytes_read);
-            memcpy(chunks[chunk_index].md5, md5, MD5_DIGEST_LENGTH);
-            add_md5(hash_table, md5, chunk_index);
-            chunk_index++;
-        }
-    }
 }
 
 void undeduplicate_file(FILE *file, Chunk **chunks, int *chunk_count) {
