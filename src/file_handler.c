@@ -61,8 +61,8 @@ void update_backup_log(const char *logfile, log_t *logs) {
     fclose(file);
 }
 
-// Fonction pour écrire un élément de log dans le fichier
-void write_log_element(log_element *elt, FILE *file) {
+// Fonction pour écrire un élément de log dans le fichier                       ( tu pourrais modifier pour prendre en parametre le file, le chemin,la date et le md5 ?)
+void write_log_element(log_element *elt, FILE *file) {                          //pour que j'ai pas a créer un element dans mes fonctions à moi + à gérer les free
     fprintf(file, "%s %s %32s\n", elt->path, elt->date, elt->md5);
 }
 

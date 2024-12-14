@@ -61,5 +61,8 @@ void deduplicate_file(FILE *file, Chunk *chunks, Md5Entry *hash_table);
  */
 void undeduplicate_file(FILE *file, Chunk **chunks, int *chunk_count);
 
+
+//besoin d'une fonction pour calculer le md5 d'un fichier//
+
 #endif // DEDUPLICATION_H
 

@@ -27,8 +27,10 @@ void list_backups(const char *backup_dir);
 int check_if_backup_exist(const char *backup_dir);
 // Fonction pour générer le nom du directory backup
 void generate_backup_name(char *backup_name);
-// Fonction permettant de faire une copie complète par lien dur
+// Fonction permettant de faire une copie complète par lien dur et génère le log
 void full_backup(const char *source_dir, const char *backup_dir);
+// Fonction pour parcourir récursivement les répertoires et générer le log
+void generate_backup_log(const char *source_dir, const char *backup_name, const char *log_file);
 
 #endif // BACKUP_MANAGER_H
 

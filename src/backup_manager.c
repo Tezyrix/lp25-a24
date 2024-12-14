@@ -9,14 +9,25 @@
 #include <sys/stat.h>
 #include <regex.h>
 
-// global_hash_table HASH_TABLE_SIZE à faire
+// global_hash_table HASH_TABLE_SIZE à faire get_md5      write_log_element(path, mtime_str, md5_str, log);
 
 // Fonction pour créer une nouvelle sauvegarde complète puis incrémentale
-void create_backup(const char *source_dir, const char *backup_dir) {
-    /**  
+void create_backup(const char *source_dir, const char *backup_dir){
+    /**
      * @param source_dir est le chemin vers le répertoire à sauvegarder
      * @param backup_dir est le chemin vers le répertoire de sauvegarde
      */
+
+    // Si aucune backup n'existe, faire une sauvegarde complète
+    if (!check_if_backup_exist(backup_dir)) {
+        printf("Pas de backup trouvé, sauvegarde complète...\n");
+        full_backup(source_dir, backup_dir);
+    } else {
+        // Si une sauvegarde existe déjà, effectuer une sauvegarde incrémentale
+        printf("Backup trouvé, on effectue une sauvegarde incrémentale\n", backup_dir);
+        // Appeler la fonction pour effectuer une sauvegarde incrémentale ici
+        // incr_backup(source_dir, backup_dir);  // La fonction incrémentale sera implémentée plus tard
+    }
 }
 
 // Fonction permettant d'enregistrer dans fichier le tableau de chunk dédupliqué  
@@ -230,7 +241,7 @@ void generate_backup_name(char *backup_name) {
 }
 
 
-// Fonction permettant de faire une copie complète par lien dur
+// Fonction permettant de faire une copie complète par lien dur et génère le log
 void full_backup(const char *source_dir, const char *backup_dir) {
     /**
      * @param source_dir source à copier
@@ -261,11 +272,65 @@ void full_backup(const char *source_dir, const char *backup_dir) {
             // Si c'est un répertoire, on crée un répertoire de sauvegarde
             mkdir(backup_file_path, 0755); 
             // Procédé de récursivité cas particulier 
-            create_backup(source_path, backup_file_path);
+            full_backup(source_path, backup_file_path);
         } else if (entry->d_type == DT_REG) {
             // Sinon cas général, c'est un fichier on fait un lien dur
             link(source_path, backup_file_path);
         }
     }
     closedir(source);
+    // Générer le fichier de log après la sauvegarde
+    char log_file[512];
+    snprintf(log_file, sizeof(log_file), "%s/%s.backup_log", backup_dir, backup_name);
+    generate_backup_log(source_dir, backup_name); 
+}
+
+// Fonction pour parcourir récursivement les répertoires et générer le log
+void generate_backup_log(const char *source_dir, const char *backup_name, const char *log_file) {
+    DIR *dir = opendir(source_dir);
+    if (!dir) {
+        perror("Erreur d'ouverture du répertoire");
+        return;
+    }
+
+    struct dirent *entry;
+    struct stat file_stat;
+
+    // Ouvrir le fichier log en mode ajout
+    FILE *log = fopen(log_file, "a");
+    if (!log) {
+        perror("Erreur d'ouverture du fichier log");
+        closedir(dir);
+        return;
+    }
+
+    // On parcours chaque entrée du répertoire
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignorer les fichiers et répertoires commençant par "." et ".."
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", source_dir, entry->d_name);
+        stat(path, &file_stat);
+
+        // Récupérer la date de dernière modification (mtime)
+        struct tm *mtime_tm = localtime(&file_stat.st_mtime);
+        char mtime_str[20];
+        strftime(mtime_str, sizeof(mtime_str), "%Y-%m-%d %H:%M:%S", mtime_tm);
+
+        // Si c'est un fichier, calculer le MD5 pour le mettre dans le log
+        if (S_ISREG(file_stat.st_mode)) {
+            unsigned char md5_str[MD5_DIGEST_LENGTH]; 
+            get_md5(path, md5_str);                          
+            write_log_element(path, mtime_str, md5_str, log);
+        } else if (S_ISDIR(file_stat.st_mode)) {
+            write_log_element(path, mtime_str, NULL, log);
+            generate_backup_log(path, backup_name); // Appel récursif pour traiter les sous-répertoires
+        }
+    }
+    // Fermer le fichier log et le répertoire
+    fclose(log);
+    closedir(dir);
 }
