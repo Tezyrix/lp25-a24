@@ -54,7 +54,7 @@ void update_backup_log(const char *logfile, log_t *logs) {
 
     log_element *current = logs->head;
     while (current) {
-        write_log_element(current, file);
+        fprintf(file, "%s %s %32s\n", current->path, current->date, current->md5);
         current = current->next;
     }
 
