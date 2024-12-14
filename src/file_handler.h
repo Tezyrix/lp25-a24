@@ -23,8 +23,9 @@ typedef struct {
 
 log_t read_backup_log(const char *logfile);
 void update_backup_log(const char *logfile, log_t *logs);
-void write_log_element(log_element *elt, FILE *logfile);
+void write_log_element(FILE *file, const char *path, const char *date, const unsigned char *md5);
 void list_files(const char *path);
 void copy_file(const char *src, const char *dest);
+int compare_file_with_backup_log(const char *path, log_t *logs);
 
 #endif // FILE_HANDLER_H
