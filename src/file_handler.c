@@ -144,14 +144,3 @@ int compare_file_with_backup_log(const char *path, log_t *logs) {
 
     return 1; // Succès : fichier n'existe pas dans le backup_log
 }
-
-
-
-
-
-
-
-
-
-
-
