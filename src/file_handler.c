@@ -111,48 +111,83 @@ void copy_file(const char *src, const char *dest) {
 }
 
 // Fonction pour comparer un fichier avec le contenu d'un backup_log
-int compare_file_with_backup_log(const char *path, log_t *logs) {
+int compare_file_with_backup_log(const char *path, log_t *logs, const char *backup_name, const char *logfile) {
     struct stat file_stat;
     unsigned char file_md5[MD5_DIGEST_LENGTH];
     log_element *current = logs->head;
 
+    // Vérifie si le chemin est valide
     if (stat(path, &file_stat) != 0) {
-        fprintf(stderr, "Erreur : Impossible d'obtenir les informations du fichier %s\n", path);
-        return 0; // Échec si le fichier n'existe pas
+        fprintf(stderr, "Erreur : Impossible d'obtenir les informations du chemin %s\n", path);
+        return 0; // Échec si le chemin n'existe pas
     }
 
-    if (!compute_md5(path, file_md5)) {
-        fprintf(stderr, "Erreur : Impossible de calculer le MD5 pour le fichier %s\n", path);
-        return 0; // Échec si le MD5 ne peut pas être calculé
-    }
-
-    while (current) {
-        if (strcmp(current->path, path) == 0) {
-
-            if (strcmp(current->date, ctime(&file_stat.st_mtime)) != 0) {
-                return 1; // Succès : date de modification différente
+    // Si c'est un dossier
+    if (S_ISDIR(file_stat.st_mode)) {
+        // Parcourt le log pour vérifier si le dossier existe déjà
+        while (current) {
+            if (strcmp(current->path, path) == 0) {
+                return 0; // Le dossier existe déjà, aucun besoin de sauvegarde
             }
-
-            if (memcmp(current->md5, file_md5, MD5_DIGEST_LENGTH) != 0) {
-                return 1; // Succès : MD5 différent
-            }
-
-            return 0; // Échec : fichier identique
+            current = current->next;
         }
-        current = current->next;
+
+        // Ajout du dossier au log
+        log_element *new_entry = malloc(sizeof(log_element));
+        if (!new_entry) {
+            fprintf(stderr, "Erreur : Allocation mémoire échouée\n");
+            return 0;
+        }
+        snprintf(new_entry->path, sizeof(new_entry->path), "%s/%s", backup_name, path);
+        strcpy(new_entry->date, "");  // Pas de date pour les dossiers
+        memset(new_entry->md5, 0, MD5_DIGEST_LENGTH); // Pas de MD5 pour les dossiers
+        new_entry->next = logs->head;
+        logs->head = new_entry;
+
+        // Mettre à jour le fichier log
+        update_backup_log(logfile, logs);
+        return 1; // Le dossier doit être sauvegardé
     }
 
-    return 1; // Succès : fichier n'existe pas dans le backup_log
+    // Si c'est un fichier
+    if (S_ISREG(file_stat.st_mode)) {
+        // Calcul du MD5 du fichier
+        if (!compute_md5(path, file_md5)) {
+            fprintf(stderr, "Erreur : Impossible de calculer le MD5 pour le fichier %s\n", path);
+            return 0; // Échec si le MD5 ne peut pas être calculé
+        }
+
+        // Recherche du fichier dans le log
+        while (current) {
+            if (strcmp(current->path, path) == 0) {
+                // Vérifie la date de modification et le contenu
+                if (strcmp(current->date, ctime(&file_stat.st_mtime)) > 0 &&
+                    memcmp(current->md5, file_md5, MD5_DIGEST_LENGTH) != 0) {
+                    // Fichier à sauvegarder : date postérieure et contenu différent
+                    break;
+                }
+                return 0; // Le fichier est déjà à jour
+            }
+            current = current->next;
+        }
+
+        // Ajout ou mise à jour du fichier dans le log
+        log_element *new_entry = malloc(sizeof(log_element));
+        if (!new_entry) {
+            fprintf(stderr, "Erreur : Allocation mémoire échouée\n");
+            return 0;
+        }
+        snprintf(new_entry->path, sizeof(new_entry->path), "%s/%s", backup_name, path);
+        strncpy(new_entry->date, ctime(&file_stat.st_mtime), sizeof(new_entry->date) - 1);
+        new_entry->date[sizeof(new_entry->date) - 1] = '\0'; // Assure la terminaison
+        memcpy(new_entry->md5, file_md5, MD5_DIGEST_LENGTH);
+        new_entry->next = logs->head;
+        logs->head = new_entry;
+
+        // Mettre à jour le fichier log
+        update_backup_log(logfile, logs);
+        return 1; // Le fichier doit être sauvegardé
+    }
+
+    return 0; // Ni fichier ni dossier à sauvegarder
 }
-
-//	- un fichier dans la source et dans la destination est copié si :
-//-la date de modification est postérieure dans la source et le contenu est différent 
-//- la taille est différente et le contenu est différent
-
-// en gros ca serait bien si ta fonction : teste si c'est un fichier ou un dossier, 
-// si c'est un dossier: tu regardes si il existe dans le log,
-// si oui tu renvoie 0, si non tu l'ajoutes dans le log sous le format backup_name/path (backup_name que je te donne en parametre) et tu renvoie 1
-// si c'est un fichier: tu regardes si il existe dans le log,
-// si non, tu l'ajoutes dans le log sous le format backup_name/path/mtime/md5 (t'as un fonction pour calculer le md5 d'un fichier) et tu renvoie 1
-// si oui tu regardes d'abord si on doit le sauvegarder selon les critères plus haut, si non tu renvoie 0, si oui tu l'ajoute au log selon le format et tu renvoie 1 (tu peux utiliser ta fonction plus haut)
-// en gros tu renvoie 0 si je dois pas toucher au fichier, 1 si je dois le backup
