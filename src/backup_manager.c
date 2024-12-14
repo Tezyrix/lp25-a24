@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <regex.h>
 
-// global_hash_table HASH_TABLE_SIZE à faire get_md5      write_log_element(path, mtime_str, md5_str, log);
+// get_md5 
 
 // Fonction pour créer une nouvelle sauvegarde complète puis incrémentale
 void create_backup(const char *source_dir, const char *backup_dir){
@@ -34,51 +34,40 @@ void create_backup(const char *source_dir, const char *backup_dir){
         snprintf(incremental_backup_path, sizeof(incremental_backup_path), "%s/%s", backup_dir, incremental_backup_name);
         mkdir(incremental_backup_path, 0755);
 
-        // Les logs sont déjà supposés être présents dans le répertoire de sauvegarde sous le nom backup_dir.backup_log
+        // Les logs sont déjà supposés être présents dans le répertoire de sauvegarde sous le nom backup_dir.backup_log on génere le path à celui ci
         char log_file[512];
-        snprintf(log_file, sizeof(log_file), "%s/%s.backup_log", backup_dir, backup_dir);
+        snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
 
         // Effectuer une sauvegarde incrémentale
         incremental_backup(source_dir, incremental_backup_path, log_file);
         }
 }
 
-// Fonction permettant d'enregistrer dans fichier le tableau de chunk dédupliqué  
-int write_backup_file(const char *output_filename, Chunk *chunks, int chunk_count) {
-
-    /**  
+// Fonction permettant d'enregistrer dans fichier les indices des chunks dédupliqués
+int write_backup_file(const char *output_filename, int *chunk_indices, int chunk_count){
+    /**
      * @param output_filename est le fichier dans lequel on va sauvegarder
-     * @param chunks est le tableau de chunk issu de deduplicate
-     * @param chunk_count est le nombre de chunk du fichier
+     * @param chunk_indices est un tableau d'indices des chunks dédupliqués
+     * @param chunk_count est le nombre d'indices dans le tableau
      */
-
 
     // Ouvrir le fichier de sauvegarde en écriture binaire
     FILE *output_file = fopen(output_filename, "wb");
 
     if (!output_file) {
-        return 1;
+        return 1; 
     }
-
-    // Parcourir chaque chunk et écrire son index dans le fichier
-    for (int i=0; i<chunk_count; i++) {
-        unsigned char *md5=chunks[i].md5;
-
-        // Chercher l'indice dans la table de hashage globale
-        int index=find_md5(global_hash_table, md5);
-
-        // Écrire l'indice dans le fichier, suivi d'un saut de ligne (plus facile pour le restore)
-        if (fprintf(output_file, "%d\n", index) < 0) {
+    // Parcourir chaque indice et l'écrire dans le fichier
+    for (int i = 0; i < chunk_count; i++) {
+        if (fprintf(output_file, "%d\n", chunk_indices[i]) < 0) {
             fclose(output_file);
-            return 1;
+            return 1; // Erreur lors de l'écriture de l'indice
         }
     }
-    fclose(output_file);
-    return 0;
+    fclose(output_file); 
+    return 0;            
 }
 
-
-// Fonction implémentant la logique pour la sauvegarde d'un fichier         
 void backup_file(const char *filename) {
     /**
      * @param filename est le nom du fichier à sauvegarder
@@ -86,34 +75,30 @@ void backup_file(const char *filename) {
 
     FILE *file = fopen(filename, "rb");
     if (!file) {
-        perror("Error opening file for reading");
+        perror("Erreur");
         return;
     }
 
-    // Initalisation du tableau de chunk
-    Chunk *chunks = malloc(sizeof(Chunk) * HASH_TABLE_SIZE);
-    if (!chunks) {
+    // Initialisation d'un tableau d'indices dynamique pour deduplicate
+    int *chunk_indices = malloc(sizeof(int) * HASH_TABLE_SIZE); 
+    if (!chunk_indices) {
         perror("Erreur d'allocation mémoire");
         fclose(file);
         return;
     }
-
     int chunk_count = 0;
-    deduplicate_file(file, chunks, &chunk_count); // Le tableau de chunk contiendra tous les chunks du fichier (tableau temporaire local) data et md5
+    // Remplir le tableau d'indices en utilisant la fonction deduplicate_file
+    deduplicate_file(file, chunk_indices, &chunk_count);
     fclose(file);
 
     // Créer le nom du fichier de sauvegarde
     char backup_filename[512];
     snprintf(backup_filename, sizeof(backup_filename), "%s.backup", filename);
 
-    // Écriture dans le fichier de sauvegarde des indices des chunks
-    if (write_backup_file(backup_filename, chunks, chunk_count) != 0) {
+    // Écrire les indices dans le fichier de sauvegarde
+    if (write_backup_file(backup_filename, chunk_indices, chunk_count) != 0) {
         fprintf(stderr, "Erreur dans la génération du fichier %s\n", backup_filename);
-        // Free chunks si erreur
-        for (int i=0; i<chunk_count; i++) {
-            free(chunks[i].data);
-        }
-        free(chunks);
+        free(chunk_indices);
         return;
     }
 
@@ -125,23 +110,18 @@ void backup_file(const char *filename) {
             perror("Erreur de permissions");
         }
         // Modifier les dates d'accès et de modification
-        struct utimbuf new_times;               // Struct utimbuf utilisé pour les timestamps
-        new_times.actime = file_stat.st_atime;  // Heure d'accès
-        new_times.modtime = file_stat.st_mtime; // Heure de modification
+        struct utimbuf new_times;
+        new_times.actime = file_stat.st_atime;
+        new_times.modtime = file_stat.st_mtime;
         utime(backup_filename, &new_times);
     } else {
         perror("Pas accès aux informations du fichier");
     }
+    // Libérer la mémoire allouée pour les indices
+    free(chunk_indices);
 
-    // Free chunks
-    for (int i=0; i<chunk_count; i++) {
-        free(chunks[i].data); 
-    }
-    free(chunks);
     printf("%s done\n", filename);
 }
-
-
 
 // Fonction permettant la restauration du fichier backup via le tableau de chunk
 void write_restored_file(const char *output_filename, Chunk *chunks, int chunk_count) {
@@ -273,7 +253,7 @@ void full_backup(const char *source_dir, const char *backup_dir) {
 
     struct dirent *entry;
     while ((entry = readdir(source)) != NULL) {
-        if (entry->d_name[0] == '.') { // Ignorer les 
+        if (entry->d_name[0] == '.') { 
             continue;
         }
         char source_path[512], backup_file_path[512];
@@ -293,33 +273,36 @@ void full_backup(const char *source_dir, const char *backup_dir) {
     }
     closedir(source);
     // Générer le fichier de log après la sauvegarde
-    char log_file[512];
-    snprintf(log_file, sizeof(log_file), "%s/%s.backup_log", backup_dir, backup_name);
-    generate_backup_log(source_dir, backup_name); 
+    generate_backup_log(source_dir, backup_dir);
 }
 
-// Fonction pour parcourir récursivement les répertoires et générer le log
-void generate_backup_log(const char *source_dir, const char *backup_name, const char *log_file) {
+// Fonction pour générer le fichier de log après une sauvegarde
+void generate_backup_log(const char *source_dir, const char *backup_dir)
+{
+    // Créer le nom du fichier log : backup_dir.backup_log
+    char log_file[512];
+    snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
+
+    // Ouvrir le fichier de log en mode ajout
+    FILE *log = fopen(log_file, "a");
+    if (!log) {
+        perror("Erreur d'ouverture du fichier log");
+        return;
+    }
+    // Ouvrir le répertoire source
     DIR *dir = opendir(source_dir);
     if (!dir) {
         perror("Erreur d'ouverture du répertoire");
+        fclose(log);
         return;
     }
 
     struct dirent *entry;
     struct stat file_stat;
 
-    // Ouvrir le fichier log en mode ajout
-    FILE *log = fopen(log_file, "a");
-    if (!log) {
-        perror("Erreur d'ouverture du fichier log");
-        closedir(dir);
-        return;
-    }
-
-    // On parcours chaque entrée du répertoire
+    // Parcourir chaque entrée du répertoire source
     while ((entry = readdir(dir)) != NULL) {
-        // Ignorer les fichiers et répertoires commençant par "." et ".."
+        // Ignorer les fichiers et répertoires cachés (commençant par ".")
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -333,16 +316,19 @@ void generate_backup_log(const char *source_dir, const char *backup_name, const 
         char mtime_str[20];
         strftime(mtime_str, sizeof(mtime_str), "%Y-%m-%d %H:%M:%S", mtime_tm);
 
-        // Si c'est un fichier, calculer le MD5 pour le mettre dans le log
+        // Si c'est un fichier, calculer le MD5 pour l'ajouter dans le log
         if (S_ISREG(file_stat.st_mode)) {
-            unsigned char md5_str[MD5_DIGEST_LENGTH]; 
-            get_md5(path, md5_str);                          
-            write_log_element(path, mtime_str, md5_str, log);
+            unsigned char md5_str[MD5_DIGEST_LENGTH];
+            get_md5(path, md5_str);                           // Calculer le MD5 du fichier
+            write_log_element(log, path, mtime_str, md5_str); // Ajouter les informations dans le log
         } else if (S_ISDIR(file_stat.st_mode)) {
-            write_log_element(path, mtime_str, NULL, log);
-            generate_backup_log(path, backup_name); // Appel récursif pour traiter les sous-répertoires
+            // Si c'est un répertoire, ajouter son info dans le log
+            write_log_element(log, path, mtime_str, NULL); // Aucun MD5 pour les répertoires
+            // Appel récursif pour traiter les sous-répertoires
+            generate_backup_log(path, backup_dir);
         }
     }
+
     // Fermer le fichier log et le répertoire
     fclose(log);
     closedir(dir);

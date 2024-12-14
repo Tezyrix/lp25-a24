@@ -123,3 +123,9 @@ int main(int argc, char *argv[]) {
 
     return EXIT_SUCCESS;
 }
+
+
+
+
+
+// début du programme initialize_global_table et à la fin close_global_table
