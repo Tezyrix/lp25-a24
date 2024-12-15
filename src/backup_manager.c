@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <regex.h>
 
-//pas utiliser les hashages réellement
+//pas utiliser les hashages réellement, dans le log c'est pas le md5 du fichier dédupliqué mais celui du fichier d'origine
 
 // Fonction pour créer une nouvelle sauvegarde complète puis incrémentale
 void create_backup(const char *source_dir, const char *backup_dir){
@@ -68,6 +68,7 @@ int write_backup_file(const char *output_filename, int *chunk_indices, int chunk
     return 0;            
 }
 
+// Fonction permettant de créer une backup d'un fichier en .backup
 void backup_file(const char *filename) {
     /**
      * @param filename est le nom du fichier à sauvegarder
@@ -121,19 +122,6 @@ void backup_file(const char *filename) {
     free(chunk_indices);
 
     printf("%s done\n", filename);
-}
-
-// Fonction permettant la restauration du fichier backup via le tableau de chunk
-void write_restored_file(const char *output_filename, Chunk *chunks, int chunk_count) {
-    /*
-    */
-}
-
-// Fonction pour restaurer une sauvegarde
-void restore_backup(const char *backup_id, const char *restore_dir) {
-    /* @param: backup_id est le chemin vers le répertoire de la sauvegarde que l'on veut restaurer
-    *          restore_dir est le répertoire de destination de la restauration
-    */
 }
 
 // Fonction permettant de lister les différentes sauvegardes présentes dans la destination 
@@ -425,4 +413,19 @@ void check_and_mark_deleted_files(const char *source_dir, log_t *logs, const cha
         }
         current = current->next;
     }
+}
+
+// Fonction permettant la restauration du fichier backup via le tableau de chunk
+void write_restored_file(const char *output_filename, Chunk *chunks, int chunk_count)
+{
+    /*
+     */
+}
+
+// Fonction pour restaurer une sauvegarde
+void restore_backup(const char *backup_id, const char *restore_dir)
+{
+    /* @param: backup_id est le chemin vers le répertoire de la sauvegarde que l'on veut restaurer
+     *          restore_dir est le répertoire de destination de la restauration
+     */
 }
