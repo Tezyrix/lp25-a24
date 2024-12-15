@@ -8,74 +8,18 @@ unsigned int hash_md5(unsigned char *md5) {
     return hash % HASH_TABLE_SIZE;
 }
 
-// Fonction qui calcule le MD5 d'un chunk de données
-void compute_md5(unsigned char *data, unsigned char *md5) {
-    /**
-     * @param data donnée du chunk
-     * @param md5 md5 du chunk
-     */
-    MD5_CTX context;    // Structure pour l'état de calcul du MD5
-    MD5_Init(&context); // Initialiser le contexte
-    // Calculer le MD5 du chunk
-    MD5_Update(&context, data, CHUNK_SIZE);
-    // Obtenir le résultat du calcul MD5 dans le tableau md5
-    MD5_Final(md5, &context);
-}
+/**
+ * @brief Système de déduplication.
+ *
+ * - **Tables Globales** : Stocke les chunks dédupliqués uniques (identifiés par MD5). Elles sont initialisées au début et fermées à la fin.
+ * - **Déduplication** : Les fichiers sont découpés en chunks, et seuls les chunks uniques sont ajoutés aux tables globales.
+ * - **Calcul MD5** : Chaque chunk et fichier ont un hash MD5 unique permettant de vérifier les doublons.
+ * - **Restauration** : Les fichiers peuvent être reconstruits à partir des indices en effectuant l'inverse de la déduplication.
+ * 
+ * Ce système permet de sauvegarder efficacement, tout en réduisant l'espace utilisé grâce à la gestion des chunks.
+ */
 
-// Fonction qui chercher l'indice d'un md5 d'un chunk dans la table de hashage global
-int find_md5(Md5Entry *hash_table, unsigned char *md5) {
-    /**
-     * @param hash_table table de hashage global
-     * @param md5 md5 du chunk à chercher
-     */
-    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        if (memcmp(hash_table[i].md5, md5, MD5_DIGEST_LENGTH) == 0) {
-            return hash_table[i].index;
-        }
-    }
-    return -1;
-}
-
-
-// Fonction permettant la déduplication d'un fichier régulier en un tableau d'indice non unique
-void deduplicate_file(const char *file_path, int *chunk_indices, int *chunk_count) {
-    /**
-     * @param file_path nom du fichier à dédupliquer
-     * @param chunk_indices tableau d'int contenant la liste des indices des chunks du fichier (non unique)
-     * @param chunk_count nombre de chunk du fichier
-     */
-    FILE *file = fopen(file_path, "rb");
-    if (file == NULL) {
-        return; // Si le fichier n'est pas ouvert, on ne fait rien
-    }
-    unsigned char buffer[CHUNK_SIZE];     // Buffer pour stocker un chunk
-    unsigned char md5[MD5_DIGEST_LENGTH]; // MD5 du chunk
-    while (1) {
-        // Lire un chunk du fichier
-        size_t bytes_read = fread(buffer, 1, CHUNK_SIZE, file);
-        if (bytes_read == 0) {
-            break; // Fin du fichier
-        }
-        // Calculer le MD5 du chunk lu
-        compute_md5(buffer, md5);
-        // Check si le chunk est déja connu
-        add_to_global_tables(buffer, md5);
-        // Chercher l'indice du chunk dans la table de hachage
-        int index = find_md5(global_hash_table, md5);
-        chunk_indices[*chunk_count] = index;
-        (*chunk_count)++;
-    }
-    fclose(file);
-}
-
-void undeduplicate_file(FILE *file, Chunk **chunks, int *chunk_count) {
-}
-
-// Fonction permettant d'initialiser les deux tables globales qu'on utilise tout au long du programme
 void initialize_global_tables() {
-    /**
-     * @param
-     */
 
     // Essayer d'ouvrir les fichiers en mode lecture/écriture
     FILE *hash_file = fopen("hash_table.dat", "r+b");
@@ -115,12 +59,9 @@ void initialize_global_tables() {
     global_chunk_file = chunk_file;
 }
 
-// Fonction permettant pour un chunk donné de l'ajouter dans les tables globales si il n'existe pas déja de manière unique
+
 void add_to_global_tables(void *data, unsigned char *md5) {
-    /**
-     * @param data donnée du chunk
-     * @param md5 md5 du chunk
-     */
+
     int chunk_index = -1;
     int last_index = -1;
 
@@ -153,24 +94,130 @@ void add_to_global_tables(void *data, unsigned char *md5) {
     memcpy(global_chunks[chunk_index].md5, md5, MD5_DIGEST_LENGTH);
 }
 
-// Fonction permettant de fermer les tables globales quand on ne les utilise plus
+
 void close_global_tables() {
+
     if (global_hash_file) {
         fclose(global_hash_file);
-        global_hash_file = NULL; 
+        global_hash_file = NULL;
     }
-    if (global_chunk_file){
+    if (global_chunk_file) {
         fclose(global_chunk_file);
         global_chunk_file = NULL;
     }
 }
 
-/**
- * @brief Calcule le MD5 d'un fichier.
- * @param file Le pointeur vers le fichier à analyser.
- * @param md5 Un tableau de 16 octets pour stocker le résultat du hash MD5.
- */
+
+void deduplicate_file(const char *file_path, int *chunk_indices, int *chunk_count) {
+
+    FILE *file = fopen(file_path, "rb");
+    if (file == NULL) {
+        return; // Si le fichier n'est pas ouvert, on ne fait rien
+    }
+    unsigned char buffer[CHUNK_SIZE];     // Buffer pour stocker un chunk
+    unsigned char md5[MD5_DIGEST_LENGTH]; // MD5 du chunk
+    while (1) {
+        // Lire un chunk du fichier
+        size_t bytes_read = fread(buffer, 1, CHUNK_SIZE, file);
+        if (bytes_read == 0) {
+            break; // Fin du fichier
+        }
+        // Calculer le MD5 du chunk lu
+        compute_md5(buffer, md5);
+        // Check si le chunk est déja connu
+        add_to_global_tables(buffer, md5);
+        // Chercher l'indice du chunk dans la table de hachage
+        int index = find_md5(global_hash_table, md5);
+        chunk_indices[*chunk_count] = index;
+        (*chunk_count)++;
+    }
+    fclose(file);
+}
+
+
+void compute_md5(unsigned char *data, unsigned char *md5) {
+
+    MD5_CTX context;    // Structure pour l'état de calcul du MD5
+    MD5_Init(&context); // Initialiser le contexte
+    // Calculer le MD5 du chunk
+    MD5_Update(&context, data, CHUNK_SIZE);
+    // Obtenir le résultat du calcul MD5 dans le tableau md5
+    MD5_Final(md5, &context);
+}
+
+
+int find_md5(Md5Entry *hash_table, unsigned char *md5) {
+
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        if (memcmp(hash_table[i].md5, md5, MD5_DIGEST_LENGTH) == 0) {
+            return hash_table[i].index;
+        }
+    }
+    return -1;
+}
+
+
+void undeduplicate(const char *input_filename, const char *output_filename) {
+
+    FILE *input_file = fopen(input_filename, "r");
+    FILE *output_file = fopen(output_filename, "wb");
+
+    if (!input_file) {
+        perror("Erreur lors de l'ouverture du fichier d'entrée");
+        return;
+    }
+    if (!output_file) {
+        perror("Erreur lors de l'ouverture du fichier de sortie");
+        fclose(input_file);
+        return;
+    }
+
+    char line[1024]; // Pour lire chaque ligne du fichier d'entrée
+
+    // Récuperer l'index à chaque ligne
+    while (fgets(line, sizeof(line), input_file)) {
+        int index;
+        sscanf(line, "%d", &index); 
+
+        // Récuperer le chunk associé
+        Chunk chunk_out;
+        get_chunk_from_index(index, &chunk_out);
+
+        fwrite(chunk_out.data, 1, CHUNK_SIZE, output_file); // Écrire le chunk dans le fichier
+    }
+
+    // Fermer les fichiers après traitement
+    fclose(input_file);
+    fclose(output_file);
+}
+
+
+void get_chunk_from_index(int index, Chunk *chunk_out) { 
+
+    unsigned char md5[MD5_DIGEST_LENGTH];
+    // Première boucle : Chercher le md5 dans la table de hachage avec l'index
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        Md5Entry *entry = global_hash_table[i];
+        if (entry && entry->index == index) {
+            // Si l'index correspond, on récupère le md5 associé
+            memcpy(md5, entry->md5, MD5_DIGEST_LENGTH);
+            break;
+        }
+    }
+    // Deuxième boucle : Chercher le chunk correspondant au md5 dans la table de chunks
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        Chunk *chunk = md5_to_data[i];
+        if (chunk && memcmp(chunk->md5, md5, MD5_DIGEST_LENGTH) == 0) {
+            // Si les md5 correspondent, on copie le chunk dans chunk_out
+            memcpy(chunk_out, chunk, sizeof(Chunk));
+            return; // Chunk trouvé, on quitte la fonction
+        }
+    }
+}
+
+
 void find_file_MD5(FILE *file, unsigned char *md5) {
+
     if (!file || !md5) {
         fprintf(stderr, "Paramètres invalides pour find_file_MD5.\n");
         return;

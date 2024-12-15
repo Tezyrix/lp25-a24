@@ -5,6 +5,9 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <regex.h>
+#include <unistd.h>
+#include <openssl/md5.h>
 
 // Fonction permettant de lire un fichier de log existant
 log_t read_backup_log(const char *logfile) {
@@ -139,7 +142,7 @@ int compare_file_with_backup_log(const char *path, log_t *logs, const char *back
             return 0;
         }
         snprintf(new_entry->path, sizeof(new_entry->path), "%s/%s", backup_name, path);
-        strcpy(new_entry->date, "");  // Pas de date pour les dossiers
+        strcpy(new_entry->date, "0");  // Pas de date pour les dossiers
         memset(new_entry->md5, 0, MD5_DIGEST_LENGTH); // Pas de MD5 pour les dossiers
         new_entry->next = logs->head;
         logs->head = new_entry;
@@ -190,4 +193,61 @@ int compare_file_with_backup_log(const char *path, log_t *logs, const char *back
     }
 
     return 0; // Ni fichier ni dossier à sauvegarder
+}
+
+void generate_backup_log(const char *source_dir, const char *backup_dir) {
+
+    // Créer le nom du fichier log : backup_dir.backup_log
+    char log_file[512];
+    snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
+
+    // Ouvrir le fichier de log en mode ajout
+    FILE *log = fopen(log_file, "a");
+    if (!log) {
+        perror("Erreur d'ouverture du fichier log");
+        return;
+    }
+    // Ouvrir le répertoire source
+    DIR *dir = opendir(source_dir);
+    if (!dir) {
+        perror("Erreur d'ouverture du répertoire");
+        fclose(log);
+        return;
+    }
+
+    struct dirent *entry;
+    struct stat file_stat;
+
+    // Parcourir chaque entrée du répertoire source
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignorer les fichiers et répertoires cachés (commençant par ".")
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", source_dir, entry->d_name);
+        stat(path, &file_stat);
+
+        // Récupérer la date de dernière modification (mtime)
+        struct tm *mtime_tm = localtime(&file_stat.st_mtime);
+        char mtime_str[20];
+        strftime(mtime_str, sizeof(mtime_str), "%Y-%m-%d %H:%M:%S", mtime_tm);
+
+        // Si c'est un fichier, calculer le MD5 pour l'ajouter dans le log
+        if (S_ISREG(file_stat.st_mode)) {
+            unsigned char md5_str[MD5_DIGEST_LENGTH];
+            find_file_MD5(path, md5_str);                     // Calculer le MD5 du fichier
+            write_log_element(log, path, mtime_str, md5_str); // Ajouter les informations dans le log
+        } else if (S_ISDIR(file_stat.st_mode)) {
+            // Si c'est un répertoire, ajouter son info dans le log
+            write_log_element(log, path, mtime_str, NULL); // Aucun MD5 pour les répertoires
+            // Appel récursif pour traiter les sous-répertoires
+            generate_backup_log(path, backup_dir);
+        }
+    }
+
+    // Fermer le fichier log et le répertoire
+    fclose(log);
+    closedir(dir);
 }

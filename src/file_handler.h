@@ -28,4 +28,15 @@ void list_files(const char *path);
 void copy_file(const char *src, const char *dest);
 int compare_file_with_backup_log(const char *path, log_t *logs, const char *backup_name, const char *logfile);
 
+/**
+ * @brief Génère un fichier de log après une sauvegarde.
+ *
+ * Cette fonction crée un fichier de log retraçant les informations de la sauvegarde réalisée.
+ * Elle enregistre les détails concernant le répertoire source et la destination de la sauvegarde.
+ *
+ * @param source_dir Le répertoire source de la sauvegarde.
+ * @param backup_dir Le répertoire de destination où la sauvegarde a été effectuée.
+ */
+void generate_backup_log(const char *source_dir, const char *backup_dir);
+
 #endif // FILE_HANDLER_H

@@ -8,15 +8,41 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <regex.h>
+#include <unistd.h>
+#include <openssl/md5.h>
 
-//pas utiliser les hashages réellement, dans le log c'est pas le md5 du fichier dédupliqué mais celui du fichier d'origine
+/**
+ * @brief Explication du système de sauvegarde et de restauration.
+ *
+ * Le répertoire de sauvegarde (`backup_dir`) contient :
+ * - Un répertoire contenant la sauvegarde complète (full backup) par hard link.
+ * - Un fichier de log retraçant toutes les sauvegardes.
+ * - Les tables globales utilisées dans le programme principal.
+ * - Des répertoires des sauvegardes incrémentales, chacun contenant des fichiers/dossiers modifiés ou ajoutés
+ *   sous forme dédupliquée, permettant de prendre moins de place.
+ *
+ * La sauvegarde complète (full backup) ne prend aucun espace supplémentaire puisqu'elle est réalisée via des hard links.
+ * Le log est un fichier texte léger qui enregistre les informations relatives aux sauvegardes.
+ * Les répertoires des sauvegardes incrémentales contiennent uniquement des fichiers dédupliqués, qui sont très légers. Ces fichiers contiennent des indices de chunk.
+ * Les tables globales sont les seuls éléments à contenir des données réelles. Elles stockent les informations de tous les chunks dédupliqués.
+ *
+ * Lors de la restauration, on récupère simplement les informations du log jusqu'à une date donnée, et on reconstruit progressivement le répertoire.
+ * A noter qu'il n'y a pas de comparaison avec la source pendant la restauration. Ce système permet donc de maintenir plusieurs sauvegardes à différentes dates et de pouvoir restaurer à chacune de ces dates.
+ *
+ * Ce mécanisme est particulièrement adapté pour la sauvegarde et la restauration de répertoires légers qui sont fréquemment modifiés. Il permet également de restaurer à des dates antérieures.
+ *
+ * @note Points à améliorer :
+ * - Bien qu'il y ait une table de hashage, on n'utilise pas réellement le hashage, cela pourrait permettre de parcourir les tables bien
+ *   plus facilement.
+ * - Dans le log on n'inscrit pas le md5 du fichier dédupliqué mais celui du fichier d'origine
+ */
 
-// Fonction pour créer une nouvelle sauvegarde complète puis incrémentale
-void create_backup(const char *source_dir, const char *backup_dir){
-    /**
-     * @param source_dir est le chemin vers le répertoire à sauvegarder
-     * @param backup_dir est le chemin vers le répertoire de sauvegarde
-     */
+
+
+
+
+
+void create_backup(const char *source_dir, const char *backup_dir) {
 
     // Si aucune backup n'existe, faire une sauvegarde complète
     if (!check_if_backup_exist(backup_dir)) {
@@ -43,36 +69,84 @@ void create_backup(const char *source_dir, const char *backup_dir){
         }
 }
 
-// Fonction permettant d'enregistrer dans fichier les indices des chunks dédupliqués
-int write_backup_file(const char *output_filename, int *chunk_indices, int chunk_count){
-    /**
-     * @param output_filename est le fichier dans lequel on va sauvegarder
-     * @param chunk_indices est un tableau d'indices des chunks dédupliqués
-     * @param chunk_count est le nombre d'indices dans le tableau
-     */
 
-    // Ouvrir le fichier de sauvegarde en écriture binaire
-    FILE *output_file = fopen(output_filename, "wb");
+int check_if_backup_exist(const char *backup_dir) {
 
-    if (!output_file) {
-        return 1; 
+    DIR *dir = opendir(backup_dir);
+    if (!dir) {
+        perror("opendir");
+        return 0;
     }
-    // Parcourir chaque indice et l'écrire dans le fichier
-    for (int i = 0; i < chunk_count; i++) {
-        if (fprintf(output_file, "%d\n", chunk_indices[i]) < 0) {
-            fclose(output_file);
-            return 1; // Erreur lors de l'écriture de l'indice
+    struct dirent *entry;
+    regex_t regex;
+
+    // Compile la regex au format pour qu'elle soit utilisable
+    if (regcomp(&regex, "^\\d{4}-\\d{2}-\\d{2}-\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$", REG_EXTENDED) != 0) {
+        perror("La regex n'a pas pu être compilée");
+        closedir(dir);
+        return 0;
+    }
+
+    // Parcours des fichiers dans le répertoire
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignorer les fichiers commencant par . (sécurité)
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        // Vérifier si c'est un répertoire et si son nom correspond à la regex
+        if (entry->d_type == DT_DIR) {
+            if (regexec(&regex, entry->d_name, 0, NULL, 0) == 0) {
+                regfree(&regex); // Free la regex venant de regcomp
+                closedir(dir);
+                return 1; // Succès
+            }
         }
     }
-    fclose(output_file); 
-    return 0;            
+    regfree(&regex); // Libérer la mémoire de la regex
+    closedir(dir);   // Fermer le répertoire
+    return 0;        // Aucune sauvegarde trouvée, retour 0
 }
 
-// Fonction permettant de créer une backup d'un fichier en .backup
+
+void full_backup(const char *source_dir, const char *backup_dir) {
+
+    char backup_name[256];
+    generate_backup_name(backup_name); // Générer le nom de la backup
+
+    // Créer le répertoire de sauvegarde dans backup_dir
+    char backup_path[512];
+    snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, backup_name);
+    mkdir(backup_path, 0755); // Umask classique   rwxr-xr-x
+
+    DIR *source = opendir(source_dir);
+
+    struct dirent *entry;
+    while ((entry = readdir(source)) != NULL) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        char source_path[512], backup_file_path[512];
+        snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_path, entry->d_name);
+
+        // Vérification du type de fichier avec d_type
+        if (entry->d_type == DT_DIR) {
+            // Si c'est un répertoire, on crée un répertoire de sauvegarde
+            mkdir(backup_file_path, 0755);
+            // Procédé de récursivité cas particulier
+            full_backup(source_path, backup_file_path);
+        } else if (entry->d_type == DT_REG) {
+            // Sinon cas général, c'est un fichier on fait un lien dur
+            link(source_path, backup_file_path);
+        }
+    }
+    closedir(source);
+    // Générer le fichier de log après la sauvegarde
+    generate_backup_log(source_dir, backup_dir);
+}
+
+
 void backup_file(const char *filename) {
-    /**
-     * @param filename est le nom du fichier à sauvegarder
-     */
 
     FILE *file = fopen(filename, "rb");
     if (!file) {
@@ -124,91 +198,28 @@ void backup_file(const char *filename) {
     printf("%s done\n", filename);
 }
 
-// Fonction permettant de lister les différentes sauvegardes présentes dans la destination 
-void list_backups(const char *backup_dir){
-    /**
-     * @param backup_dir dossier dans lequel on liste les backups
-     */
 
-    DIR *dir = opendir(backup_dir);
-    if (!dir) {
-        perror("opendir");
-        return;
+int write_backup_file(const char *output_filename, int *chunk_indices, int chunk_count) {
+
+    // Ouvrir le fichier de sauvegarde en écriture binaire
+    FILE *output_file = fopen(output_filename, "wb");
+
+    if (!output_file) {
+        return 1;
     }
-
-    struct dirent *entry;
-    regex_t regex;
-
-    // Compile la regex au format pour qu'elle soit utilisable
-    if ((regcomp(&regex, "^\\d{4}-\\d{2}-\\d{2}-\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$", REG_EXTENDED)) != 0) {
-        perror("La regex n'a pas pu être compilée");
-        return;
-    }
-
-    while ((entry = readdir(dir)) != NULL) {
-        // Ignorer les directory spéciaux commençant par .
-        if (entry->d_name[0] == '.') {
-            continue;
-        }    
-        // On vérifie d'abord si c'est un directory 
-        if (entry->d_type == DT_DIR) {
-            // Puis on vérifie que son nom correspond au format de la backup
-            if (regexec(&regex, entry->d_name, 0, NULL, 0) == 0) {
-                printf("%s\n", entry->d_name);
-            }
+    // Parcourir chaque indice et l'écrire dans le fichier
+    for (int i = 0; i < chunk_count; i++) {
+        if (fprintf(output_file, "%d\n", chunk_indices[i]) < 0) {
+            fclose(output_file);
+            return 1; // Erreur lors de l'écriture de l'indice
         }
     }
-    regfree(&regex); // On libère la mémoire venant du regcomp
-    closedir(dir);
-}
-
-// Fonction pour vérifier si une sauvegarde existe dans le répertoire donné            
-int check_if_backup_exist(const char *backup_dir) {
-    /**
-     * @param backup_dir dossier dans lequel on cherche s'il existe une backup
-     */
-
-    DIR *dir = opendir(backup_dir);
-    if (!dir) {
-        perror("opendir");
-        return 0;
-    }
-    struct dirent *entry;
-    regex_t regex;
-
-    // Compile la regex au format pour qu'elle soit utilisable
-    if (regcomp(&regex, "^\\d{4}-\\d{2}-\\d{2}-\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$", REG_EXTENDED) != 0) {
-        perror("La regex n'a pas pu être compilée");
-        closedir(dir);
-        return 0;
-    }
-
-    // Parcours des fichiers dans le répertoire
-    while ((entry = readdir(dir)) != NULL) {
-        // Ignorer les fichiers commencant par . (sécurité)
-        if (entry->d_name[0] == '.') {
-            continue;
-        }
-        // Vérifier si c'est un répertoire et si son nom correspond à la regex
-        if (entry->d_type == DT_DIR) {
-            if (regexec(&regex, entry->d_name, 0, NULL, 0) == 0) {
-                regfree(&regex); // Free la regex venant de regcomp
-                closedir(dir);   
-                return 1;        // Succès
-            }
-        }
-    }
-    regfree(&regex); // Libérer la mémoire de la regex
-    closedir(dir);   // Fermer le répertoire
-    return 0;        // Aucune sauvegarde trouvée, retour 0
+    fclose(output_file);
+    return 0;
 }
 
 
-// Fonction pour générer le nom du directory backup  
 void generate_backup_name(char *backup_name) {
-    /**
-     * @param backup_name chaine de caractère vide dans lequel on va stocker le nom de la backup
-     */
 
     struct timeval tv;
     gettimeofday(&tv, NULL);                    // Récupérer le temps actuel puis on le formate avec localtime
@@ -222,114 +233,8 @@ void generate_backup_name(char *backup_name) {
 }
 
 
-// Fonction permettant de faire une copie complète par lien dur et génère le log
-void full_backup(const char *source_dir, const char *backup_dir) {
-    /**
-     * @param source_dir source à copier
-     * @param backup_dir dossier dans lequel on va copier
-     */
-
-    char backup_name[256];
-    generate_backup_name(backup_name); // Générer le nom de la backup
-
-    // Créer le répertoire de sauvegarde dans backup_dir
-    char backup_path[512];
-    snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, backup_name);
-    mkdir(backup_path, 0755); // Umask classique   rwxr-xr-x
-
-    DIR *source = opendir(source_dir);
-
-    struct dirent *entry;
-    while ((entry = readdir(source)) != NULL) {
-        if (entry->d_name[0] == '.') { 
-            continue;
-        }
-        char source_path[512], backup_file_path[512];
-        snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
-        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_path, entry->d_name);
-
-        // Vérification du type de fichier avec d_type
-        if (entry->d_type == DT_DIR) {
-            // Si c'est un répertoire, on crée un répertoire de sauvegarde
-            mkdir(backup_file_path, 0755); 
-            // Procédé de récursivité cas particulier 
-            full_backup(source_path, backup_file_path);
-        } else if (entry->d_type == DT_REG) {
-            // Sinon cas général, c'est un fichier on fait un lien dur
-            link(source_path, backup_file_path);
-        }
-    }
-    closedir(source);
-    // Générer le fichier de log après la sauvegarde
-    generate_backup_log(source_dir, backup_dir);
-}
-
-// Fonction pour générer le fichier de log après une sauvegarde
-void generate_backup_log(const char *source_dir, const char *backup_dir)
-{
-    // Créer le nom du fichier log : backup_dir.backup_log
-    char log_file[512];
-    snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
-
-    // Ouvrir le fichier de log en mode ajout
-    FILE *log = fopen(log_file, "a");
-    if (!log) {
-        perror("Erreur d'ouverture du fichier log");
-        return;
-    }
-    // Ouvrir le répertoire source
-    DIR *dir = opendir(source_dir);
-    if (!dir) {
-        perror("Erreur d'ouverture du répertoire");
-        fclose(log);
-        return;
-    }
-
-    struct dirent *entry;
-    struct stat file_stat;
-
-    // Parcourir chaque entrée du répertoire source
-    while ((entry = readdir(dir)) != NULL) {
-        // Ignorer les fichiers et répertoires cachés (commençant par ".")
-        if (entry->d_name[0] == '.') {
-            continue;
-        }
-
-        char path[1024];
-        snprintf(path, sizeof(path), "%s/%s", source_dir, entry->d_name);
-        stat(path, &file_stat);
-
-        // Récupérer la date de dernière modification (mtime)
-        struct tm *mtime_tm = localtime(&file_stat.st_mtime);
-        char mtime_str[20];
-        strftime(mtime_str, sizeof(mtime_str), "%Y-%m-%d %H:%M:%S", mtime_tm);
-
-        // Si c'est un fichier, calculer le MD5 pour l'ajouter dans le log
-        if (S_ISREG(file_stat.st_mode)) {
-            unsigned char md5_str[MD5_DIGEST_LENGTH];
-            find_file_MD5(path, md5_str);                     // Calculer le MD5 du fichier
-            write_log_element(log, path, mtime_str, md5_str); // Ajouter les informations dans le log
-        } else if (S_ISDIR(file_stat.st_mode)) {
-            // Si c'est un répertoire, ajouter son info dans le log
-            write_log_element(log, path, mtime_str, NULL); // Aucun MD5 pour les répertoires
-            // Appel récursif pour traiter les sous-répertoires
-            generate_backup_log(path, backup_dir);
-        }
-    }
-
-    // Fermer le fichier log et le répertoire
-    fclose(log);
-    closedir(dir);
-}
-
-// Fonction effectuant une sauvegarde incrémentale d'un directory en mettant également à jour les logs
 void incremental_backup(const char *source_dir, const char *incremental_backup_dir, log_t *logs, const char *logfile) {
-    /**
-     * @param source_dir source que l'on va sauvegarder
-     * @param incremental_backup_dir directory dans lequel on va sauvegarder les fichiers modifiés ou ajoutés
-     * @param logs liste chainée représentant les logs
-     * @param logfile fichier log de toutes les sauvegardes
-     */
+
     DIR *source = opendir(source_dir);
     if (!source) {
         perror("Erreur d'ouverture du répertoire source");
@@ -384,13 +289,9 @@ void incremental_backup(const char *source_dir, const char *incremental_backup_d
     check_and_mark_deleted_files(source_dir, logs, logfile);
 }
 
-// Fonction vérifiant qu'il n'y a pas de fichier en trop dans la backup par rapport à la source et met à jour les logs 
+
 void check_and_mark_deleted_files(const char *source_dir, log_t *logs, const char *logfile) {
-    /**
-     * @param source_dir source à laquelle on va comparer les logs
-     * @param logs liste chainé représentant les logs
-     * @param logfile fichier log
-     */
+
     log_element *current = logs->head; // Parcours de la liste des logs
 
     while (current != NULL) {
@@ -408,24 +309,157 @@ void check_and_mark_deleted_files(const char *source_dir, log_t *logs, const cha
                 perror("Erreur lors de l'ouverture du fichier log");
                 return;
             }
-            fprintf(log_file, "%s;-1\n", current->path);
+            fprintf(log_file, "%s;-1;0\n", current->path);   
             fclose(log_file); 
         }
         current = current->next;
     }
 }
 
-// Fonction permettant la restauration du fichier backup via le tableau de chunk
-void write_restored_file(const char *output_filename, Chunk *chunks, int chunk_count)
-{
-    /*
-     */
+
+void restore_backup(const char *backup_dir, const char *destination_dir, const char *restore_date_str) {
+
+    // Construire le chemin du fichier log
+    char log_file_path[512];
+    snprintf(log_file_path, sizeof(log_file_path), "%s/%s.backup_log", backup_dir, backup_dir);
+
+    // Ouvrir le fichier log en mode lecture
+    FILE *log_file = fopen(log_file_path, "r");
+    if (!log_file) {
+        perror("Erreur lors de l'ouverture du fichier log");
+        return; // Si le fichier log ne peut pas être ouvert, on arrête la fonction.
+    }
+
+    // Convertir la date de restauration en struct tm
+    struct tm restore_tm;
+    memset(&restore_tm, 0, sizeof(struct tm));
+    strptime(restore_date_str, "%Y-%m-%d-%H:%M:%S", &restore_tm);
+    time_t restore_time = mktime(&restore_tm);
+
+    // Lire chaque ligne du log
+    char line[1024];
+    while (fgets(line, sizeof(line), log_file)) {
+        // Extraire la date de la ligne
+        char date_str[24];              // Format YYYY-MM-DD-hh:mm:ss.sss
+        sscanf(line, "%23s", date_str); // On prend seulement les premiers 23 caractères
+
+        // Convertir la date de la ligne en struct tm
+        struct tm log_tm;
+        memset(&log_tm, 0, sizeof(struct tm));
+        strptime(date_str, "%Y-%m-%d-%H:%M:%S", &log_tm);
+        time_t log_time = mktime(&log_tm);
+
+        // Comparer les dates
+        if (log_time > restore_time) {
+            // Si la date dans le log est supérieure à la date de restauration, on arrête
+            break;
+        }
+        // Extraire les informations restantes de la ligne : path, mtime, md5
+        char file_path[512];
+        time_t mtime;
+        unsigned char md5[MD5_DIGEST_LENGTH];
+        int md5_found = sscanf(line + 24, "%511s;%ld;%32s", file_path, &mtime, md5);
+
+        // Si md5_found == 3, on a bien récupéré le md5
+        if (md5_found == 3) {
+            // Restauration du fichier
+            restore_file_from_backup(backup_dir, destination_dir, file_path, mtime, md5);
+        }
+    }
+
+    // Fermer le fichier log
+    fclose(log_file);
 }
 
-// Fonction pour restaurer une sauvegarde
-void restore_backup(const char *backup_id, const char *restore_dir)
-{
-    /* @param: backup_id est le chemin vers le répertoire de la sauvegarde que l'on veut restaurer
-     *          restore_dir est le répertoire de destination de la restauration
-     */
+
+void restore_file_from_backup(const char *backup_dir, const char *destination_dir, const char *file_path, time_t mtime, unsigned char *md5) {
+
+    // Si mtime == -1, il faut supprimer le fichier ou dossier
+    if (mtime == -1) {
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", destination_dir, file_path);
+        struct stat statbuf;
+        if (stat(full_path, &statbuf) == 0) {
+            if (S_ISREG(statbuf.st_mode)) {
+                remove(full_path);
+            } else if (S_ISDIR(statbuf.st_mode)) {
+                rmdir(full_path);
+            }
+        }
+    } else if (mtime == 0) { // c'est un dossier à créer
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", destination_dir, file_path);
+        mkdir(full_path, 0755);
+    } else if (mtime > 0 && md5 != NULL) { // Si mtime > 0, restaurer un fichier 
+        // Construire le chemin complet du fichier .backup dans le backup_dir
+        char backup_file_path[512];
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s.backup", backup_dir, file_path);
+
+        // Appeler la fonction write_restored_file pour générer le fichier restauré
+        // Ce fichier sera écrit temporairement dans le répertoire de destination
+        write_restored_file(backup_file_path, destination_dir);
+
+        // Construire le chemin complet pour déplacer le fichier restauré
+        char restored_file_path[512];
+        snprintf(restored_file_path, sizeof(restored_file_path), "%s/%s", destination_dir, file_path);
+
+        // Déplacer le fichier temporaire vers sa destination finale, écrasant si nécessaire
+        if (rename(backup_file_path, restored_file_path) == 0){
+            printf("Fichier restauré depuis le backup : %s\n", restored_file_path);
+            // On réapplique le mtime
+            struct utimbuf new_times;
+            new_times.actime = mtime; 
+            new_times.modtime = mtime;
+            utime(restored_file_path, &new_times);
+        } else {
+            perror("Erreur lors du déplacement du fichier restauré");
+        }
+    }
+}
+
+
+void write_restored_file(const char *backup_filename) {
+
+    // Construire le nom du fichier de sortie (enlever l'extension .backup)
+    char output_filename[1024];
+    strncpy(output_filename, backup_filename, strlen(backup_filename) - 7); // Enlever ".backup"
+    output_filename[strlen(backup_filename) - 7] = '\0';                    // Terminer la chaîne de caractères
+
+    // Utiliser la fonction undeduplicate pour restaurer le fichier
+    undeduplicate(backup_filename, output_filename);
+}
+
+
+void list_backups(const char *backup_dir) {
+
+    DIR *dir = opendir(backup_dir);
+    if (!dir) {
+        perror("opendir");
+        return;
+    }
+
+    struct dirent *entry;
+    regex_t regex;
+
+    // Compile la regex au format pour qu'elle soit utilisable
+    if ((regcomp(&regex, "^\\d{4}-\\d{2}-\\d{2}-\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$", REG_EXTENDED)) != 0) {
+        perror("La regex n'a pas pu être compilée");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignorer les directory spéciaux commençant par .
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        // On vérifie d'abord si c'est un directory
+        if (entry->d_type == DT_DIR) {
+            // Puis on vérifie que son nom correspond au format de la backup
+            if (regexec(&regex, entry->d_name, 0, NULL, 0) == 0) {
+                printf("%s\n", entry->d_name);
+            }
+        }
+    }
+    regfree(&regex); // On libère la mémoire venant du regcomp
+    closedir(dir);
 }

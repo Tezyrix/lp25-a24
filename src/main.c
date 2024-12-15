@@ -129,3 +129,4 @@ int main(int argc, char *argv[]) {
 
 
 // début du programme initialize_global_table et à la fin close_global_table
+// initalize_global_table génére/ouvre les fichier dans le repertoire actuel (à faire quand on est dans le backup_dir)
