@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <regex.h>
 
-// get_md5 
+//pas utiliser les hashages réellement
 
 // Fonction pour créer une nouvelle sauvegarde complète puis incrémentale
 void create_backup(const char *source_dir, const char *backup_dir){
@@ -37,9 +37,9 @@ void create_backup(const char *source_dir, const char *backup_dir){
         // Les logs sont déjà supposés être présents dans le répertoire de sauvegarde sous le nom backup_dir.backup_log on génere le path à celui ci
         char log_file[512];
         snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
-
+        log_t log_chain = read_backup_log(log_file);
         // Effectuer une sauvegarde incrémentale
-        incremental_backup(source_dir, incremental_backup_path, log_file);
+        incremental_backup(source_dir, incremental_backup_path, log_chain, log_file);
         }
 }
 
@@ -319,7 +319,7 @@ void generate_backup_log(const char *source_dir, const char *backup_dir)
         // Si c'est un fichier, calculer le MD5 pour l'ajouter dans le log
         if (S_ISREG(file_stat.st_mode)) {
             unsigned char md5_str[MD5_DIGEST_LENGTH];
-            get_md5(path, md5_str);                           // Calculer le MD5 du fichier
+            find_file_MD5(path, md5_str);                     // Calculer le MD5 du fichier
             write_log_element(log, path, mtime_str, md5_str); // Ajouter les informations dans le log
         } else if (S_ISDIR(file_stat.st_mode)) {
             // Si c'est un répertoire, ajouter son info dans le log
@@ -334,7 +334,14 @@ void generate_backup_log(const char *source_dir, const char *backup_dir)
     closedir(dir);
 }
 
-void incremental_backup(const char *source_dir, const char *backup_dir, log_t *logs) {
+// Fonction effectuant une sauvegarde incrémentale d'un directory en mettant également à jour les logs
+void incremental_backup(const char *source_dir, const char *incremental_backup_dir, log_t *logs, const char *logfile) {
+    /**
+     * @param source_dir source que l'on va sauvegarder
+     * @param incremental_backup_dir directory dans lequel on va sauvegarder les fichiers modifiés ou ajoutés
+     * @param logs liste chainée représentant les logs
+     * @param logfile fichier log de toutes les sauvegardes
+     */
     DIR *source = opendir(source_dir);
     if (!source) {
         perror("Erreur d'ouverture du répertoire source");
@@ -350,7 +357,7 @@ void incremental_backup(const char *source_dir, const char *backup_dir, log_t *l
 
         char source_path[512], backup_file_path[512];
         snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
-        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_dir, entry->d_name);
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", incremental_backup_dir, entry->d_name);
 
         struct stat file_stat;
         stat(source_path, &file_stat);
@@ -358,28 +365,64 @@ void incremental_backup(const char *source_dir, const char *backup_dir, log_t *l
         // Vérifier si c'est un fichier ou un répertoire
         if (S_ISDIR(file_stat.st_mode)) {
             // Si c'est un répertoire, on compare avec les logs
-            if (compare_file_with_backup_log(source_path, logs)) {
-                mkdir(backup_file_path, 0755); // Le répertoire est nouveau
+            if (compare_file_with_backup_log(source_path , logs, incremental_backup_dir, log_file)) {
+                mkdir(backup_file_path, 0755); // Le répertoire est nouveau, on le crée
             }
             // Traiter récursivement le sous-répertoire
-            incremental_backup(source_path, backup_file_path, logs);
+            incremental_backup(source_dir, backup_file_path, logs, log_file);
         } else if (S_ISREG(file_stat.st_mode)) {
             // Si c'est un fichier, on compare avec les logs
-            if (compare_file_with_backup_log(source_path, logs))
-            {
+            if (compare_file_with_backup_log(source_path, logs, incremental_backup_dir, log_file)) {
                 // Si le fichier a changé ou est nouveau, on le sauvegarde
                 backup_file(source_path); // Sauvegarde le fichier en créant un fichier de backup
 
-                // Déplacer le fichier de sauvegarde dans le répertoire de sauvegarde
+                // Construire le chemin du fichier de sauvegarde .backup dans le répertoire de sauvegarde incrémentale
                 char backup_file_name[512];
-                snprintf(backup_file_name, sizeof(backup_file_name), "%s/%s", backup_dir, entry->d_name);
-                if (rename(source_path, backup_file_name) != 0) {
-                    perror("Erreur lors du déplacement du fichier de sauvegarde");
-                } else {
-                    printf("Fichier sauvegardé et déplacé : %s\n", backup_file_name);
-                }
+                snprintf(backup_file_name, sizeof(backup_file_name), "%s/%s", incremental_backup_dir, entry->d_name);
+
+                // Copier le fichier .backup dans le répertoire de sauvegarde incrémentale
+                char backup_source_path[512];
+                snprintf(backup_source_path, sizeof(backup_source_path), "%s.backup", source_path);
+                copy_file(backup_source_path, backup_file_name); // Copier le fichier .backup dans la destination
+                printf("Fichier .backup copié vers : %s\n", backup_file_name);
+
+                // Supprimer le fichier .backup de la source après la copie
+                remove(backup_source_path);
             }
         }
     }
     closedir(source);
+    // Vérifier les fichiers supprimés dans la source et mettre à jour le log
+    check_and_mark_deleted_files(source_dir, logs, logfile);
+}
+
+// Fonction vérifiant qu'il n'y a pas de fichier en trop dans la backup par rapport à la source et met à jour les logs 
+void check_and_mark_deleted_files(const char *source_dir, log_t *logs, const char *logfile) {
+    /**
+     * @param source_dir source à laquelle on va comparer les logs
+     * @param logs liste chainé représentant les logs
+     * @param logfile fichier log
+     */
+    log_element *current = logs->head; // Parcours de la liste des logs
+
+    while (current != NULL) {
+        char file_path[512];
+        snprintf(file_path, sizeof(file_path), "%s/%s", source_dir, current->path);
+
+        struct stat file_stat;
+        int exists = stat(file_path, &file_stat); // Vérifie si le fichier existe
+
+        // Si le fichier n'existe pas on met l'entrée dans le log comme étant -1 à la date de modification
+        if (exists != 0) {
+            printf("Fichier supprimé détecté : %s\n", current->path);
+            FILE *log_file = fopen(logfile, "a"); 
+            if (!log_file) {
+                perror("Erreur lors de l'ouverture du fichier log");
+                return;
+            }
+            fprintf(log_file, "%s;-1\n", current->path);
+            fclose(log_file); 
+        }
+        current = current->next;
+    }
 }

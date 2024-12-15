@@ -31,6 +31,10 @@ void generate_backup_name(char *backup_name);
 void full_backup(const char *source_dir, const char *backup_dir);
 // Fonction pour parcourir récursivement les répertoires et générer le log
 void generate_backup_log(const char *source_dir, const char *backup_name, const char *log_file);
+// Fonction effectuant une sauvegarde incrémentale d'un directory en mettant également à jour les logs
+void incremental_backup(const char *source_dir, const char *incremental_backup_dir, log_t *logs, const char *logfile);
+// Fonction vérifiant qu'il n'y a pas de fichier en trop dans la backup par rapport à la source et met à jour les logs
+void check_and_mark_deleted_files(const char *source_dir, log_t *logs, const char *logfile);
 
 #endif // BACKUP_MANAGER_H
 

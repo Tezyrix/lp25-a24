@@ -164,3 +164,29 @@ void close_global_tables() {
         global_chunk_file = NULL;
     }
 }
+
+/**
+ * @brief Calcule le MD5 d'un fichier.
+ * @param file Le pointeur vers le fichier à analyser.
+ * @param md5 Un tableau de 16 octets pour stocker le résultat du hash MD5.
+ */
+void find_file_MD5(FILE *file, unsigned char *md5) {
+    if (!file || !md5) {
+        fprintf(stderr, "Paramètres invalides pour find_file_MD5.\n");
+        return;
+    }
+
+    MD5_CTX ctx;
+    unsigned char buffer[CHUNK_SIZE];
+    size_t bytes_read;
+
+    // Initialisation du contexte MD5
+    MD5_Init(&ctx);
+
+    // Lire le fichier par blocs et mettre à jour le hash
+    while ((bytes_read = fread(buffer, 1, CHUNK_SIZE, file)) > 0) {
+        MD5_Update(&ctx, buffer, bytes_read);
+    }
+    // Finalisation : calculer le hash final
+    MD5_Final(md5, &ctx);
+}

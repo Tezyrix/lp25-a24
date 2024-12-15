@@ -17,7 +17,7 @@ log_t read_backup_log(const char *logfile) {
 
     char path[256], date[64];
     unsigned char md5[MD5_DIGEST_LENGTH];
-    while (fscanf(file, "%s %s %32s", path, date, md5) == 3) {
+    while (fscanf(file, "%s;%s;%32s", path, date, md5) == 3) {
         log_element *new_element = malloc(sizeof(log_element));
         if (!new_element) {
             perror("Erreur d'allocation mémoire");
@@ -63,7 +63,7 @@ void update_backup_log(const char *logfile, log_t *logs) {
 
 // Fonction pour écrire un élément de log dans le fichier                       
 void write_log_element(FILE *file, const char *path, const char *date, const unsigned char *md5) {
-    if (!file || !path || !date || !md5) {
+    if (!file || !path || !date ) {   // j'ai du modifié ici parce que j'envoie un MD5 NULL si c'est un directory
         fprintf(stderr, "Invalid parameter passed to write_log_element.\n");
         return;
     }
@@ -152,7 +152,7 @@ int compare_file_with_backup_log(const char *path, log_t *logs, const char *back
     // Si c'est un fichier
     if (S_ISREG(file_stat.st_mode)) {
         // Calcul du MD5 du fichier
-        if (!compute_md5(path, file_md5)) {
+        if (!find_file_md5(path, file_md5)) {
             fprintf(stderr, "Erreur : Impossible de calculer le MD5 pour le fichier %s\n", path);
             return 0; // Échec si le MD5 ne peut pas être calculé
         }
