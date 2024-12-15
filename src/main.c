@@ -27,7 +27,10 @@ int main(int argc, char *argv[]) {
     int backup_flag = 0, restore_flag = 0, list_flag = 0;
     char *source_dir = NULL, *dest_dir = NULL;
     char *s_server = NULL, *d_server = NULL;
+    char *date = NULL;
     int dry_run = 0, verbose = 0;
+
+    initialize_global_tables();
 
     struct option long_options[] = {
         {"backup", no_argument, &backup_flag, 1},
@@ -38,13 +41,14 @@ int main(int argc, char *argv[]) {
         {"d-server", required_argument, NULL, 'd'},
         {"source", required_argument, NULL, 'r'},
         {"dest", required_argument, NULL, 't'},
+        {"date", required_argument, NULL, 'm'},
         {"verbose", no_argument, &verbose, 1},
         {0, 0, 0, 0}
     };
 
     // Parsing des arguments
     int opt;
-    while ((opt = getopt_long(argc, argv, "s:d:r:t:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "s:d:r:t:m:", long_options, &option_index)) != -1) {
         switch (opt) {
             case 's':
                 s_server = optarg;
@@ -58,8 +62,12 @@ int main(int argc, char *argv[]) {
             case 't':
                 dest_dir = optarg;
                 break;
+             case 'm':
+                date = optarg;
+                break;
             case '?':
                 print_usage();
+                close_global_tables();
                 return EXIT_FAILURE;
         }
     }
@@ -67,21 +75,25 @@ int main(int argc, char *argv[]) {
     // Vérification des options
     if (backup_flag && (restore_flag || list_flag)) {
         fprintf(stderr, "Erreur: --backup ne peut pas être utilisé avec --restore ou --list-backups\n");
+        close_global_tables();
         return EXIT_FAILURE;
     }
 
     if (restore_flag && (backup_flag || list_flag)) {
         fprintf(stderr, "Erreur: --restore ne peut pas être utilisé avec --backup ou --list-backups\n");
+        close_global_tables();
         return EXIT_FAILURE;
     }
 
     if (list_flag && (backup_flag || restore_flag)) {
         fprintf(stderr, "Erreur: --list-backups ne peut pas être utilisé avec --backup ou --restore\n");
+        close_global_tables();
         return EXIT_FAILURE;
     }
 
     if (!source_dir || !dest_dir) {
         fprintf(stderr, "Erreur: Les options --source et --dest sont obligatoires\n");
+        close_global_tables();
         return EXIT_FAILURE;
     }
 
@@ -94,7 +106,7 @@ int main(int argc, char *argv[]) {
         if (dry_run) {
             printf("Mode dry-run: aucune sauvegarde réelle effectuée.\n");
         } else {
-            create_backup(source_dir, dest_dir);
+            create_backup(source_dir, dest_dir, date);
         }
 
     } else if (restore_flag) {
@@ -118,15 +130,10 @@ int main(int argc, char *argv[]) {
     } else {
         fprintf(stderr, "Erreur: Aucune option valide spécifiée. Utilisez --backup, --restore, ou --list-backups.\n");
         print_usage();
+        close_global_tables();
         return EXIT_FAILURE;
     }
-
+    
+    close_global_tables();
     return EXIT_SUCCESS;
 }
-
-
-
-
-
-// début du programme initialize_global_table et à la fin close_global_table
-// initalize_global_table génére/ouvre les fichier dans le repertoire actuel (à faire quand on est dans le backup_dir)
