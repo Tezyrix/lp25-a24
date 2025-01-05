@@ -1,4 +1,5 @@
 #include "file_handler.h"
+#include "deduplication.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -155,10 +156,11 @@ int compare_file_with_backup_log(const char *path, log_t *logs, const char *back
     // Si c'est un fichier
     if (S_ISREG(file_stat.st_mode)) {
         // Calcul du MD5 du fichier
-        if (!find_file_md5(path, file_md5)) {
+        if (!path || !file_md5){
             fprintf(stderr, "Erreur : Impossible de calculer le MD5 pour le fichier %s\n", path);
             return 0; // Échec si le MD5 ne peut pas être calculé
         }
+        find_file_MD5(path, file_md5);
 
         // Recherche du fichier dans le log
         while (current) {
