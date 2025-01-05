@@ -30,6 +30,10 @@ typedef struct {
     int index;
 } Md5Entry;
 
+Md5Entry *global_hash_table;
+Chunk *global_chunks;
+FILE *global_hash_file, *global_chunk_file;
+
 /**
  @brief Fonction de hachage MD5 pour l'indexation dans la table de hachage
  */
