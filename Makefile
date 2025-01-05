@@ -5,8 +5,8 @@ OBJ = $(SRC:.c=.o)
 
 all: lp25_borgbackup
 
-cborgbackup: $(OBJ)
-    $(CC) -o $@ $^
+lp25_borgbackup: $(OBJ)
+	$(CC) -o $@ $^
 
 clean:
-    rm -f $(OBJ) lp25_borgbackup
+	rm -f $(OBJ) lp25_borgbackup
