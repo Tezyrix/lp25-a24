@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
         if (dry_run) {
             printf("Mode dry-run: aucune sauvegarde réelle effectuée.\n");
         } else {
-            create_backup(source_dir, dest_dir, date);
+            create_backup(source_dir, dest_dir);
         }
 
     } else if (restore_flag) {
@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
         if (dry_run) {
             printf("Mode dry-run: aucune restauration réelle effectuée.\n");
         } else {
-            restore_backup(source_dir, dest_dir);
+            restore_backup(source_dir, dest_dir,date);
         }
 
     } else if (list_flag) {

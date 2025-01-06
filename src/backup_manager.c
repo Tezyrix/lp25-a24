@@ -50,7 +50,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         full_backup(source_dir, backup_dir);
     } else {
         // Si une sauvegarde existe déjà, effectuer une sauvegarde incrémentale
-        printf("Backup trouvé, on effectue une sauvegarde incrémentale\n", backup_dir);
+        printf("Backup trouvé, on effectue une sauvegarde incrémentale\n");
         // Générer le nom du répertoire pour la sauvegarde incrémentale
         char incremental_backup_name[256];
         generate_backup_name(incremental_backup_name);
@@ -65,7 +65,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
         log_t log_chain = read_backup_log(log_file);
         // Effectuer une sauvegarde incrémentale
-        incremental_backup(source_dir, incremental_backup_path, log_chain, log_file);
+        incremental_backup(source_dir, incremental_backup_path, &log_chain, log_file);
         }
 }
 
@@ -163,8 +163,16 @@ void backup_file(const char *filename) {
     }
     int chunk_count = 0;
     // Remplir le tableau d'indices en utilisant la fonction deduplicate_file
-    deduplicate_file(file, chunk_indices, &chunk_count);
+    deduplicate_file(filename, chunk_indices, &chunk_count);
     fclose(file);
+
+    // Obtenir les informations du fichier source pour les timestamps
+    struct stat file_stat;
+    if (stat(filename, &file_stat) != 0) {
+        perror("Erreur lors de l'obtention des informations du fichier");
+        free(chunk_indices);
+        return;
+    }
 
     // Créer le nom du fichier de sauvegarde
     char backup_filename[512];
@@ -177,26 +185,24 @@ void backup_file(const char *filename) {
         return;
     }
 
-    // Obtenir les informations du fichier source
-    struct stat file_stat;
-    if (stat(filename, &file_stat) == 0) {
-        // Modifier les permissions du fichier backup
-        if (chmod(backup_filename, file_stat.st_mode) != 0) {
-            perror("Erreur de permissions");
-        }
-        // Modifier les dates d'accès et de modification
-        struct utimbuf new_times;
-        new_times.actime = file_stat.st_atime;
-        new_times.modtime = file_stat.st_mtime;
-        utime(backup_filename, &new_times);
-    } else {
-        perror("Pas accès aux informations du fichier");
+    // Modifier les dates d'accès et de modification
+    struct timespec new_times[2];
+    new_times[0].tv_sec = file_stat.st_atime;  // Heure d'accès
+    new_times[0].tv_nsec = 0;  // Nanosecondes (optionnel)
+    new_times[1].tv_sec = file_stat.st_mtime;  // Heure de modification
+    new_times[1].tv_nsec = 0;  // Nanosecondes (optionnel)
+
+    // Appliquer les nouveaux temps à backup_filename
+    if (utimensat(0, backup_filename, new_times, 0) != 0) {
+        perror("Erreur lors de la mise à jour des timestamps");
     }
+
     // Libérer la mémoire allouée pour les indices
     free(chunk_indices);
 
     printf("%s done\n", filename);
 }
+
 
 
 int write_backup_file(const char *output_filename, int *chunk_indices, int chunk_count) {
@@ -258,14 +264,14 @@ void incremental_backup(const char *source_dir, const char *incremental_backup_d
         // Vérifier si c'est un fichier ou un répertoire
         if (S_ISDIR(file_stat.st_mode)) {
             // Si c'est un répertoire, on compare avec les logs
-            if (compare_file_with_backup_log(source_path , logs, incremental_backup_dir, log_file)) {
+            if (compare_file_with_backup_log(source_path , logs, incremental_backup_dir, logfile)) {
                 mkdir(backup_file_path, 0755); // Le répertoire est nouveau, on le crée
             }
             // Traiter récursivement le sous-répertoire
-            incremental_backup(source_dir, backup_file_path, logs, log_file);
+            incremental_backup(source_dir, backup_file_path, logs, logfile);
         } else if (S_ISREG(file_stat.st_mode)) {
             // Si c'est un fichier, on compare avec les logs
-            if (compare_file_with_backup_log(source_path, logs, incremental_backup_dir, log_file)) {
+            if (compare_file_with_backup_log(source_path, logs, incremental_backup_dir, logfile)) {
                 // Si le fichier a changé ou est nouveau, on le sauvegarde
                 backup_file(source_path); // Sauvegarde le fichier en créant un fichier de backup
 
@@ -397,26 +403,31 @@ void restore_file_from_backup(const char *backup_dir, const char *destination_di
 
         // Appeler la fonction write_restored_file pour générer le fichier restauré
         // Ce fichier sera écrit temporairement dans le répertoire de destination
-        write_restored_file(backup_file_path, destination_dir);
+        write_restored_file(backup_file_path);
 
         // Construire le chemin complet pour déplacer le fichier restauré
         char restored_file_path[512];
         snprintf(restored_file_path, sizeof(restored_file_path), "%s/%s", destination_dir, file_path);
 
         // Déplacer le fichier temporaire vers sa destination finale, écrasant si nécessaire
-        if (rename(backup_file_path, restored_file_path) == 0){
+        if (rename(backup_file_path, restored_file_path) == 0) {
             printf("Fichier restauré depuis le backup : %s\n", restored_file_path);
             // On réapplique le mtime
-            struct utimbuf new_times;
-            new_times.actime = mtime; 
-            new_times.modtime = mtime;
-            utime(restored_file_path, &new_times);
+            struct timespec new_times[2];  // Utiliser struct timespec
+            new_times[0].tv_sec = mtime;
+            new_times[0].tv_nsec = 0;
+            new_times[1].tv_sec = mtime;
+            new_times[1].tv_nsec = 0;
+
+            // Appliquer les nouveaux timestamps au fichier restauré
+            if (utimensat(0, restored_file_path, new_times, 0) != 0) {
+                perror("Erreur lors de la mise à jour des timestamps");
+            }
         } else {
             perror("Erreur lors du déplacement du fichier restauré");
         }
     }
 }
-
 
 void write_restored_file(const char *backup_filename) {
 
@@ -462,4 +473,6 @@ void list_backups(const char *backup_dir) {
     }
     regfree(&regex); // On libère la mémoire venant du regcomp
     closedir(dir);
+    
 }
+

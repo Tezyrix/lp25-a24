@@ -1,5 +1,13 @@
 #include "deduplication.h"
 
+
+
+// deduplication.c
+Md5Entry *global_hash_table = NULL;
+Chunk *global_chunks = NULL;
+FILE *global_hash_file = NULL, *global_chunk_file = NULL;
+
+
 unsigned int hash_md5(unsigned char *md5) {
     unsigned int hash = 0;
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
@@ -20,6 +28,11 @@ unsigned int hash_md5(unsigned char *md5) {
  */
 
 void initialize_global_tables() {
+
+    // Allocation de mémoire pour les tables globales
+    global_hash_table = malloc(sizeof(Md5Entry) * HASH_TABLE_SIZE);
+    global_chunks = malloc(sizeof(Chunk) * HASH_TABLE_SIZE);
+
 
     // Essayer d'ouvrir les fichiers en mode lecture/écriture
     FILE *hash_file = fopen("hash_table.dat", "r+b");
@@ -193,20 +206,21 @@ void undeduplicate(const char *input_filename, const char *output_filename) {
 
 
 void get_chunk_from_index(int index, Chunk *chunk_out) { 
-
     unsigned char md5[MD5_DIGEST_LENGTH];
+
     // Première boucle : Chercher le md5 dans la table de hachage avec l'index
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        Md5Entry *entry = global_hash_table[i];
+        Md5Entry *entry = &global_hash_table[i];  // On accède directement à l'élément
         if (entry && entry->index == index) {
             // Si l'index correspond, on récupère le md5 associé
             memcpy(md5, entry->md5, MD5_DIGEST_LENGTH);
             break;
         }
     }
+
     // Deuxième boucle : Chercher le chunk correspondant au md5 dans la table de chunks
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        Chunk *chunk = md5_to_data[i];
+        Chunk *chunk = &global_chunks[i];  // On accède directement à l'élément
         if (chunk && memcmp(chunk->md5, md5, MD5_DIGEST_LENGTH) == 0) {
             // Si les md5 correspondent, on copie le chunk dans chunk_out
             memcpy(chunk_out, chunk, sizeof(Chunk));
