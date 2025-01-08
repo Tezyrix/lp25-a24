@@ -23,7 +23,7 @@ typedef struct {
 
 log_t read_backup_log(const char *logfile);
 void update_backup_log(const char *logfile, log_t *logs);
-void write_log_element(FILE *file, const char *path, const char *date, const unsigned char *md5);
+void write_log_element(FILE *log, const char *basename, const char *mtime_str);
 void list_files(const char *path);
 void copy_file(const char *src, const char *dest);
 int compare_file_with_backup_log(const char *path, log_t *logs, const char *backup_name, const char *logfile);
@@ -37,6 +37,7 @@ int compare_file_with_backup_log(const char *path, log_t *logs, const char *back
  * @param source_dir Le répertoire source de la sauvegarde.
  * @param backup_dir Le répertoire de destination où la sauvegarde a été effectuée.
  */
-void generate_backup_log(const char *source_dir, const char *backup_dir);
+void generate_backup_log(const char *source_dir, const char *basename, FILE *log);
+void display_logs(const log_t *logs);
 
 #endif // FILE_HANDLER_H

@@ -10,6 +10,7 @@
 #include <regex.h>
 #include <unistd.h>
 #include <openssl/md5.h>
+#include <libgen.h>
 
 /**
  * @brief Explication du système de sauvegarde et de restauration.
@@ -37,7 +38,33 @@
  * - Dans le log on n'inscrit pas le md5 du fichier dédupliqué mais celui du fichier d'origine
  */
 
+/**
+    // Générer le fichier de log après la sauvegarde
+    // Créer le nom du fichier log : backup_dir.backup_log
 
+    // Créer le nom du fichier log basé sur le nom du répertoire de sauvegarde
+    char log_file[512];
+    
+    // Utiliser basename pour obtenir uniquement le nom du répertoire, sans le chemin complet
+    char backup_dir_name[512];
+    strncpy(backup_dir_name, source_dir, sizeof(backup_dir_name));
+
+    // Récupérer le nom du répertoire de sauvegarde (basename)
+    char *dir_name = basename(backup_dir_name);  // dir_name contient le nom du dossier final
+    
+    // Créer le fichier log dans le répertoire de sauvegarde
+    snprintf(log_file, sizeof(log_file), "%s%s.backup_log", backup_dir, dir_name);
+
+    // Ouvrir le fichier log en mode append
+    FILE *log = fopen(log_file, "a");
+    if (!log) {
+        perror("Erreur d'ouverture du fichier log");
+        return;
+    }
+
+    // Générer le fichier de log après la sauvegarde
+    generate_backup_log(source_dir, backup_path, log);
+ */
 
 
 
@@ -47,23 +74,70 @@ void create_backup(const char *source_dir, const char *backup_dir) {
     // Si aucune backup n'existe, faire une sauvegarde complète
     if (!check_if_backup_exist(backup_dir)) {
         printf("Pas de backup trouvé, sauvegarde complète...\n");
-        full_backup(source_dir, backup_dir);
+        char backup_name[256];
+        generate_backup_name(backup_name); // Générer le nom de la backup
+
+        // Créer le répertoire de sauvegarde dans backup_dir
+        char backup_path[512];
+        snprintf(backup_path, sizeof(backup_path), "%s%s", backup_dir, backup_name);
+
+        // Créer le répertoire de sauvegarde
+        if (mkdir(backup_path, 0755) == -1) {
+            perror("Erreur lors de la création du répertoire de sauvegarde");
+            return;
+        }
+        // Effectuer la sauvegarde complète
+        full_backup(source_dir, backup_path);
+
+       
+       char log_file[512];
+        // Dupliquer source_dir pour éviter modification de l'original
+        char *source_dir_copy = strdup(source_dir);
+        if (!source_dir_copy) {
+            perror("Erreur de duplication de source_dir");
+            return;
+        }
+
+        // Utiliser basename sur la copie de source_dir
+        char *source_name = basename(source_dir_copy);
+
+        // Générer le chemin du fichier de log dans backup_dir
+        snprintf(log_file, sizeof(log_file), "%s/%s.backup_log", backup_dir, source_name);
+
+        // Libérer la mémoire allouée pour la copie
+        free(source_dir_copy);
+
+        // Ouvrir le fichier de log en mode ajout
+        FILE *log = fopen(log_file, "a");
+        if (!log) {
+            perror("Erreur d'ouverture du fichier log");
+            return;
+        }
+  
+        // Générer le contenu du log après la sauvegarde
+
+         char *base_name = basename(backup_path);
+        generate_backup_log(backup_path,base_name, log); // Appeler la fonction pour générer le log
+
+        // Fermer le fichier de log
+        fclose(log);
     } else {
         // Si une sauvegarde existe déjà, effectuer une sauvegarde incrémentale
         printf("Backup trouvé, on effectue une sauvegarde incrémentale\n");
-        // Générer le nom du répertoire pour la sauvegarde incrémentale
+        // Générer le nom du répertoire pour la #include <libgen.h>sauvegarde incrémentale
         char incremental_backup_name[256];
         generate_backup_name(incremental_backup_name);
 
         // Créer un répertoire pour la sauvegarde incrémentale
         char incremental_backup_path[512];
-        snprintf(incremental_backup_path, sizeof(incremental_backup_path), "%s/%s", backup_dir, incremental_backup_name);
+        snprintf(incremental_backup_path, sizeof(incremental_backup_path), "%s%s", backup_dir, incremental_backup_name);
         mkdir(incremental_backup_path, 0755);
 
         // Les logs sont déjà supposés être présents dans le répertoire de sauvegarde sous le nom backup_dir.backup_log on génere le path à celui ci
         char log_file[512];
-        snprintf(log_file, sizeof(log_file), "%s.backup_log", backup_dir);
+        snprintf(log_file, sizeof(log_file), "%s%s.backup_log", backup_dir,basename(source_dir));
         log_t log_chain = read_backup_log(log_file);
+        
         // Effectuer une sauvegarde incrémentale
         incremental_backup(source_dir, incremental_backup_path, &log_chain, log_file);
         }
@@ -81,7 +155,8 @@ int check_if_backup_exist(const char *backup_dir) {
     regex_t regex;
 
     // Compile la regex au format pour qu'elle soit utilisable
-    if (regcomp(&regex, "^\\d{4}-\\d{2}-\\d{2}-\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$", REG_EXTENDED) != 0) {
+    if (regcomp(&regex, "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}$", REG_EXTENDED) != 0) {
+
         perror("La regex n'a pas pu être compilée");
         closedir(dir);
         return 0;
@@ -93,10 +168,14 @@ int check_if_backup_exist(const char *backup_dir) {
         if (entry->d_name[0] == '.') {
             continue;
         }
-        // Vérifier si c'est un répertoire et si son nom correspond à la regex
-        if (entry->d_type == DT_DIR) {
+
+
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s", backup_dir, entry->d_name);
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) { // Vérifie si c'est un répertoire
             if (regexec(&regex, entry->d_name, 0, NULL, 0) == 0) {
-                regfree(&regex); // Free la regex venant de regcomp
+                regfree(&regex);
                 closedir(dir);
                 return 1; // Succès
             }
@@ -109,40 +188,40 @@ int check_if_backup_exist(const char *backup_dir) {
 
 
 void full_backup(const char *source_dir, const char *backup_dir) {
-
-    char backup_name[256];
-    generate_backup_name(backup_name); // Générer le nom de la backup
-
-    // Créer le répertoire de sauvegarde dans backup_dir
-    char backup_path[512];
-    snprintf(backup_path, sizeof(backup_path), "%s/%s", backup_dir, backup_name);
-    mkdir(backup_path, 0755); // Umask classique   rwxr-xr-x
-
+    // Ouvrir le répertoire source
     DIR *source = opendir(source_dir);
+    if (!source) {
+        perror("Erreur d'ouverture du répertoire source");
+        return;
+    }
 
     struct dirent *entry;
     while ((entry = readdir(source)) != NULL) {
+        // Ignorer les fichiers et répertoires cachés (commençant par ".")
         if (entry->d_name[0] == '.') {
             continue;
         }
+
         char source_path[512], backup_file_path[512];
         snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
-        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_path, entry->d_name);
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", backup_dir, entry->d_name);
+
+        struct stat file_stat;
+        stat(source_path, &file_stat);
 
         // Vérification du type de fichier avec d_type
-        if (entry->d_type == DT_DIR) {
+        if (S_ISDIR(file_stat.st_mode)) {
             // Si c'est un répertoire, on crée un répertoire de sauvegarde
             mkdir(backup_file_path, 0755);
-            // Procédé de récursivité cas particulier
+            // Appel récursif pour traiter les sous-répertoires
             full_backup(source_path, backup_file_path);
-        } else if (entry->d_type == DT_REG) {
-            // Sinon cas général, c'est un fichier on fait un lien dur
+        } else if (S_ISREG(file_stat.st_mode)) {
+            // Sinon, c'est un fichier, on fait un lien dur
             link(source_path, backup_file_path);
         }
     }
+
     closedir(source);
-    // Générer le fichier de log après la sauvegarde
-    generate_backup_log(source_dir, backup_dir);
 }
 
 
@@ -256,43 +335,46 @@ void incremental_backup(const char *source_dir, const char *incremental_backup_d
 
         char source_path[512], backup_file_path[512];
         snprintf(source_path, sizeof(source_path), "%s/%s", source_dir, entry->d_name);
-        snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", incremental_backup_dir, entry->d_name);
+        snprintf(backup_file_path, sizeof(backup_file_path), "%s%s", incremental_backup_dir, entry->d_name);
+        
 
         struct stat file_stat;
         stat(source_path, &file_stat);
 
-        // Vérifier si c'est un fichier ou un répertoire
-        if (S_ISDIR(file_stat.st_mode)) {
+        if (S_ISREG(file_stat.st_mode)) {
+        // Comparer le fichier avec le log
+            
+            if (compare_file_with_backup_log(source_path, logs, incremental_backup_dir, logfile)) {
+                // Si le fichier est nouveau ou modifié, effectuer une sauvegarde
+                printf("backup\n");
+
+                
+            }
+        } else{
+             if (S_ISDIR(file_stat.st_mode)) {
             // Si c'est un répertoire, on compare avec les logs
             if (compare_file_with_backup_log(source_path , logs, incremental_backup_dir, logfile)) {
-                mkdir(backup_file_path, 0755); // Le répertoire est nouveau, on le crée
+                // Utiliser directement incremental_backup_dir pour créer le répertoire
+                char backup_file_path[PATH_MAX];
+              
+                snprintf(backup_file_path, sizeof(backup_file_path), "%s/%s", incremental_backup_dir, basename(source_path));
+                
+                // Créer le répertoire dans le répertoire de sauvegarde incrémental
+                if (mkdir(backup_file_path, 0755) == 0) {
+                    printf("Le répertoire %s a été créé dans %s\n", basename(source_path), incremental_backup_dir);
+                } else {
+                    perror("Erreur lors de la création du répertoire");
+                }
             }
-            // Traiter récursivement le sous-répertoire
-            incremental_backup(source_dir, backup_file_path, logs, logfile);
-        } else if (S_ISREG(file_stat.st_mode)) {
-            // Si c'est un fichier, on compare avec les logs
-            if (compare_file_with_backup_log(source_path, logs, incremental_backup_dir, logfile)) {
-                // Si le fichier a changé ou est nouveau, on le sauvegarde
-                backup_file(source_path); // Sauvegarde le fichier en créant un fichier de backup
 
-                // Construire le chemin du fichier de sauvegarde .backup dans le répertoire de sauvegarde incrémentale
-                char backup_file_name[512];
-                snprintf(backup_file_name, sizeof(backup_file_name), "%s/%s", incremental_backup_dir, entry->d_name);
 
-                // Copier le fichier .backup dans le répertoire de sauvegarde incrémentale
-                char backup_source_path[512];
-                snprintf(backup_source_path, sizeof(backup_source_path), "%s.backup", source_path);
-                copy_file(backup_source_path, backup_file_name); // Copier le fichier .backup dans la destination
-                printf("Fichier .backup copié vers : %s\n", backup_file_name);
-
-                // Supprimer le fichier .backup de la source après la copie
-                remove(backup_source_path);
             }
         }
+
     }
     closedir(source);
     // Vérifier les fichiers supprimés dans la source et mettre à jour le log
-    check_and_mark_deleted_files(source_dir, logs, logfile);
+    //check_and_mark_deleted_files(source_dir, logs, logfile);
 }
 
 
