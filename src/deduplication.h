@@ -13,20 +13,20 @@
 #include <unistd.h>
 
 // Taille d'un chunk (4096 octets)
-#define CHUNK_SIZE 4096
+#define CHUNK_SIZE 1000
 
 // Taille de la table de hachage qui contiendra les chunks
 // dont on a déjà calculé le MD5 pour effectuer les comparaisons
-#define HASH_TABLE_SIZE 10000
+#define HASH_TABLE_SIZE 100
 // Structure pour un chunk
 typedef struct {
-    unsigned char md5[MD5_DIGEST_LENGTH]; // MD5 du chunk
+    unsigned char md5[MD5_DIGEST_LENGTH*2+1]; // MD5 du chunk
     void *data; // Données du chunk
 } Chunk;
 
 // Table de hachage pour stocker les MD5 et leurs index
 typedef struct {
-    unsigned char md5[MD5_DIGEST_LENGTH];
+    unsigned char md5[MD5_DIGEST_LENGTH*2+1];
     int index;
 } Md5Entry;
 
@@ -109,7 +109,7 @@ void deduplicate_file(const char *file_path, int *chunk_indices, int *chunk_coun
  * @param md5 Tableau de 16 octets qui contiendra le résultat du calcul MD5.
  *            Le tableau doit être initialisé avant d'appeler la fonction.
  */
-void compute_md5(unsigned char *data, unsigned char *md5);
+void compute_md5(unsigned char *data, char *md5_hex);
 
 /**
  * @brief Cherche l'indice d'un MD5 dans la table de hashage global.

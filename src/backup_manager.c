@@ -36,35 +36,10 @@
  * - Bien qu'il y ait une table de hashage, on n'utilise pas réellement le hashage, cela pourrait permettre de parcourir les tables bien
  *   plus facilement.
  * - Dans le log on n'inscrit pas le md5 du fichier dédupliqué mais celui du fichier d'origine
+ * - Pas bonne gestion si suppresion dans un sous dossier et je ne sais pas pourquoi quand on supprime un fichier ça saute une ligne dans le log
+ * - peut pas tester restore vu que le main est pas à jour
  */
 
-/**
-    // Générer le fichier de log après la sauvegarde
-    // Créer le nom du fichier log : backup_dir.backup_log
-
-    // Créer le nom du fichier log basé sur le nom du répertoire de sauvegarde
-    char log_file[512];
-    
-    // Utiliser basename pour obtenir uniquement le nom du répertoire, sans le chemin complet
-    char backup_dir_name[512];
-    strncpy(backup_dir_name, source_dir, sizeof(backup_dir_name));
-
-    // Récupérer le nom du répertoire de sauvegarde (basename)
-    char *dir_name = basename(backup_dir_name);  // dir_name contient le nom du dossier final
-    
-    // Créer le fichier log dans le répertoire de sauvegarde
-    snprintf(log_file, sizeof(log_file), "%s%s.backup_log", backup_dir, dir_name);
-
-    // Ouvrir le fichier log en mode append
-    FILE *log = fopen(log_file, "a");
-    if (!log) {
-        perror("Erreur d'ouverture du fichier log");
-        return;
-    }
-
-    // Générer le fichier de log après la sauvegarde
-    generate_backup_log(source_dir, backup_path, log);
- */
 
 
 
@@ -104,7 +79,6 @@ void create_backup(const char *source_dir, const char *backup_dir) {
         // Générer le chemin du fichier de log dans backup_dir
         snprintf(log_file, sizeof(log_file), "%s/%s.backup_log", backup_dir, source_name);
 
-        // Libérer la mémoire allouée pour la copie
         free(source_dir_copy);
 
         // Ouvrir le fichier de log en mode ajout
@@ -116,7 +90,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
   
         // Générer le contenu du log après la sauvegarde
 
-         char *base_name = basename(backup_path);
+        char *base_name = basename(backup_path);
         generate_backup_log(backup_path,base_name, log); // Appeler la fonction pour générer le log
 
         // Fermer le fichier de log
@@ -124,7 +98,7 @@ void create_backup(const char *source_dir, const char *backup_dir) {
     } else {
         // Si une sauvegarde existe déjà, effectuer une sauvegarde incrémentale
         printf("Backup trouvé, on effectue une sauvegarde incrémentale\n");
-        // Générer le nom du répertoire pour la #include <libgen.h>sauvegarde incrémentale
+        // Générer le nom du répertoire pour la sauvegarde incrémentale
         char incremental_backup_name[256];
         generate_backup_name(incremental_backup_name);
 
@@ -267,9 +241,9 @@ void backup_file(const char *filename) {
     // Modifier les dates d'accès et de modification
     struct timespec new_times[2];
     new_times[0].tv_sec = file_stat.st_atime;  // Heure d'accès
-    new_times[0].tv_nsec = 0;  // Nanosecondes (optionnel)
+    new_times[0].tv_nsec = 0;  // Nanosecondes 
     new_times[1].tv_sec = file_stat.st_mtime;  // Heure de modification
-    new_times[1].tv_nsec = 0;  // Nanosecondes (optionnel)
+    new_times[1].tv_nsec = 0;  // Nanosecondes 
 
     // Appliquer les nouveaux temps à backup_filename
     if (utimensat(0, backup_filename, new_times, 0) != 0) {
@@ -279,8 +253,9 @@ void backup_file(const char *filename) {
     // Libérer la mémoire allouée pour les indices
     free(chunk_indices);
 
-    printf("%s done\n", filename);
+    printf("%s sauvegardé\n", basename(filename));
 }
+
 
 
 
@@ -290,15 +265,19 @@ int write_backup_file(const char *output_filename, int *chunk_indices, int chunk
     FILE *output_file = fopen(output_filename, "wb");
 
     if (!output_file) {
+        perror("Erreur d'ouverture du fichier de sauvegarde");
         return 1;
     }
+
     // Parcourir chaque indice et l'écrire dans le fichier
     for (int i = 0; i < chunk_count; i++) {
         if (fprintf(output_file, "%d\n", chunk_indices[i]) < 0) {
             fclose(output_file);
-            return 1; // Erreur lors de l'écriture de l'indice
+            perror("Erreur lors de l'écriture dans le fichier");
+            return 1; 
         }
     }
+
     fclose(output_file);
     return 0;
 }
@@ -346,7 +325,21 @@ void incremental_backup(const char *source_dir, const char *incremental_backup_d
             
             if (compare_file_with_backup_log(source_path, logs, incremental_backup_dir, logfile)) {
                 // Si le fichier est nouveau ou modifié, effectuer une sauvegarde
-                printf("backup\n");
+                backup_file(source_path); // Sauvegarde le fichier en créant un fichier de backup
+
+                // Construire le chemin du fichier de sauvegarde .backup dans le répertoire de sauvegarde incrémentale
+                char backup_file_name[512];
+                snprintf(backup_file_name, sizeof(backup_file_name), "%s/%s", incremental_backup_dir, entry->d_name);
+
+                // Copier le fichier .backup dans le répertoire de sauvegarde incrémentale
+                
+                char backup_source_path[512];
+                snprintf(backup_source_path, sizeof(backup_source_path), "%s.backup", source_path);
+                copy_file(backup_source_path, backup_file_name); // Copier le fichier .backup dans la destination
+                
+
+                // Supprimer le fichier .backup de la source après la copie
+                remove(backup_source_path);
 
                 
             }
@@ -374,34 +367,82 @@ void incremental_backup(const char *source_dir, const char *incremental_backup_d
     }
     closedir(source);
     // Vérifier les fichiers supprimés dans la source et mettre à jour le log
-    //check_and_mark_deleted_files(source_dir, logs, logfile);
+    check_and_mark_deleted_files(source_dir, logs, logfile);
 }
 
 
 void check_and_mark_deleted_files(const char *source_dir, log_t *logs, const char *logfile) {
-
-    log_element *current = logs->head; // Parcours de la liste des logs
+    log_element *current = logs->head;  // Parcours de la liste des logs
 
     while (current != NULL) {
-        char file_path[512];
-        snprintf(file_path, sizeof(file_path), "%s/%s", source_dir, current->path);
+        // Extraire le basename du fichier (juste le nom du fichier sans le chemin)
+        char file_name[512];
+        strncpy(file_name, current->path, sizeof(file_name));  // Copier le nom du fichier
+        char *basename_file = basename(file_name);  // Extraire le nom du fichier
 
-        struct stat file_stat;
-        int exists = stat(file_path, &file_stat); // Vérifie si le fichier existe
+        int file_found = 0;
+        
+        // Fonction pour rechercher récursivement le fichier dans le répertoire source
+        DIR *dir = opendir(source_dir);
+        if (!dir) {
+            perror("Erreur lors de l'ouverture du répertoire source");
+            return;
+        }
 
-        // Si le fichier n'existe pas on met l'entrée dans le log comme étant -1 à la date de modification
-        if (exists != 0) {
-            printf("Fichier supprimé détecté : %s\n", current->path);
-            FILE *log_file = fopen(logfile, "a"); 
+        struct dirent *entry;
+
+        // Parcourir les fichiers et sous-répertoires dans le répertoire
+        while ((entry = readdir(dir)) != NULL) {
+            // Ignorer les entrées spéciales "." et ".."
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+
+            // Vérifier si le fichier actuel correspond au basename du fichier recherché
+            if (strcmp(entry->d_name, basename_file) == 0) {
+                file_found = 1;  // Fichier trouvé
+                break;
+            }
+
+            // Si c'est un sous-dossier, explorer récursivement ce sous-dossier
+            if (entry->d_type == DT_DIR) {
+                char sub_dir_path[512];
+                snprintf(sub_dir_path, sizeof(sub_dir_path), "%s/%s", source_dir, entry->d_name);
+                // Appel récursif pour vérifier les sous-répertoires
+                DIR *sub_dir = opendir(sub_dir_path);
+                if (sub_dir) {
+                    struct dirent *sub_entry;
+                    while ((sub_entry = readdir(sub_dir)) != NULL) {
+                        if (strcmp(sub_entry->d_name, basename_file) == 0) {
+                            file_found = 1;  // Fichier trouvé dans un sous-répertoire
+                            closedir(sub_dir);
+                            break;
+                        }
+                    }
+                }
+                if (file_found) break; // Sortir de la boucle si le fichier est trouvé
+            }
+        }
+
+        closedir(dir); // Fermer le répertoire courant
+
+        // Si le fichier n'a pas été trouvé, on le marque comme supprimé dans le fichier log
+        if (!file_found) {
+            FILE *log_file = fopen(logfile, "a");
             if (!log_file) {
                 perror("Erreur lors de l'ouverture du fichier log");
                 return;
             }
-            fprintf(log_file, "%s;-1;0\n", current->path);   
-            fclose(log_file); 
+
+            // Marquer le fichier comme supprimé dans le fichier log
+            fprintf(log_file, "%s;-1;0\n", current->path);   // Marquer comme supprimé
+            fclose(log_file);
         }
-        current = current->next;
+
+        current = current->next;  // Passer à l'élément suivant dans la liste des logs
     }
+
+    printf("Vérification terminée.\n");
 }
 
 

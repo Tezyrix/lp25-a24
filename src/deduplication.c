@@ -28,11 +28,14 @@ unsigned int hash_md5(unsigned char *md5) {
  */
 
 void initialize_global_tables() {
-
     // Allocation de mémoire pour les tables globales
     global_hash_table = malloc(sizeof(Md5Entry) * HASH_TABLE_SIZE);
     global_chunks = malloc(sizeof(Chunk) * HASH_TABLE_SIZE);
 
+    if (!global_hash_table || !global_chunks) {
+        perror("Erreur d'allocation de mémoire pour les tables globales");
+        exit(1);
+    }
 
     // Essayer d'ouvrir les fichiers en mode lecture/écriture
     FILE *hash_file = fopen("hash_table.dat", "r+b");
@@ -40,8 +43,14 @@ void initialize_global_tables() {
 
     if (hash_file && chunk_file) {
         // Les fichiers existent : charger les données
-        fread(global_hash_table, sizeof(Md5Entry), HASH_TABLE_SIZE, hash_file);
-        fread(global_chunks, sizeof(Chunk), HASH_TABLE_SIZE, chunk_file);
+        size_t hash_read = fread(global_hash_table, sizeof(Md5Entry), HASH_TABLE_SIZE, hash_file);
+        size_t chunk_read = fread(global_chunks, sizeof(Chunk), HASH_TABLE_SIZE, chunk_file);
+
+        // Vérification si la lecture a échoué
+        if (hash_read != HASH_TABLE_SIZE || chunk_read != HASH_TABLE_SIZE) {
+            printf("Erreur de lecture des fichiers de tables. Certaines données peuvent être manquantes.\n");
+        }
+
         printf("Tables globales chargées depuis les fichiers existants.\n");
     } else {
         // Les fichiers n'existent pas : les créer et initialiser à vide
@@ -58,13 +67,16 @@ void initialize_global_tables() {
             exit(1);
         }
 
-        // Initialiser les tables globales
-        memset(global_hash_table, 0, sizeof(global_hash_table));
-        memset(global_chunks, 0, sizeof(global_chunks));
+        // Initialiser les tables globales à -1 pour chaque index
+        for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+            global_hash_table[i].index = -1;  // Initialisation à -1 pour indiquer un slot libre
+            global_chunks[i].data = NULL;     // Pas de chunk de données pour commencer
+        }
 
         // Écrire les tables initialisées dans les fichiers
         fwrite(global_hash_table, sizeof(Md5Entry), HASH_TABLE_SIZE, hash_file);
         fwrite(global_chunks, sizeof(Chunk), HASH_TABLE_SIZE, chunk_file);
+        printf("Tables globales initialisées et écrites dans les fichiers.\n");
     }
 
     // Garder les fichiers ouverts dans des pointeurs globaux
@@ -73,27 +85,42 @@ void initialize_global_tables() {
 }
 
 
-void add_to_global_tables(void *data, unsigned char *md5) {
+void save_global_tables_to_files() {
+    if (global_hash_file && global_chunk_file) {
+        // Sauvegarder global_hash_table dans le fichier
+        fseek(global_hash_file, 0, SEEK_SET);  // Remettre le curseur au début du fichier
+        fwrite(global_hash_table, sizeof(Md5Entry), HASH_TABLE_SIZE, global_hash_file);
 
+        // Sauvegarder global_chunks dans le fichier
+        fseek(global_chunk_file, 0, SEEK_SET);  // Remettre le curseur au début du fichier
+        fwrite(global_chunks, sizeof(Chunk), HASH_TABLE_SIZE, global_chunk_file);
+    } else {
+        printf("Erreur: Les fichiers ne sont pas ouverts.\n");
+    }
+}
+
+
+void add_to_global_tables(void *data, unsigned char *md5) {
     int chunk_index = -1;
     int last_index = -1;
 
     // Vérifier si le MD5 est déjà présent dans la table de hachage
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        if (global_hash_table[i].index != 0 && memcmp(global_hash_table[i].md5, md5, MD5_DIGEST_LENGTH) == 0) {
-            // Si le MD5 existe déjà, ne rien faire
+        // Si le MD5 existe déjà dans la table, ne rien faire
+        if (global_hash_table[i].index != -1 && memcmp(global_hash_table[i].md5, md5, MD5_DIGEST_LENGTH) == 0) {
             return;
         }
-        // Trouver le dernier indice utilisé (pour ajouter un nouveau chunk)
-        if (global_hash_table[i].index != 0) {
+
+        // Trouver le dernier indice utilisé (non -1)
+        if (global_hash_table[i].index != -1) {
             last_index = i;
         }
     }
 
-    // Si on a trouvé un dernier index utilisé, l'index du prochain chunk sera last_index + 1 sinon cela veut dire que la table est vide donc 0
+    // Calculer le nouvel index
     chunk_index = (last_index == -1) ? 0 : last_index + 1;
 
-    // Ajouter le MD5 dans la table de hachage avec un nouvel indice
+    // Ajouter le MD5 dans la table de hachage avec le nouvel index
     global_hash_table[chunk_index].index = chunk_index;
     memcpy(global_hash_table[chunk_index].md5, md5, MD5_DIGEST_LENGTH);
 
@@ -104,12 +131,14 @@ void add_to_global_tables(void *data, unsigned char *md5) {
         return;
     }
     memcpy(global_chunks[chunk_index].data, data, CHUNK_SIZE);
-    memcpy(global_chunks[chunk_index].md5, md5, MD5_DIGEST_LENGTH);
+    memcpy(global_chunks[chunk_index].md5, md5, MD5_DIGEST_LENGTH*2+1);
+
+    // Sauvegarder les tables dans les fichiers après l'ajout
+    save_global_tables_to_files();
 }
 
 
 void close_global_tables() {
-
     if (global_hash_file) {
         fclose(global_hash_file);
         global_hash_file = NULL;
@@ -120,47 +149,62 @@ void close_global_tables() {
     }
 }
 
-
 void deduplicate_file(const char *file_path, int *chunk_indices, int *chunk_count) {
-
     FILE *file = fopen(file_path, "rb");
     if (file == NULL) {
         return; // Si le fichier n'est pas ouvert, on ne fait rien
     }
+
     unsigned char buffer[CHUNK_SIZE];     // Buffer pour stocker un chunk
     unsigned char md5[MD5_DIGEST_LENGTH]; // MD5 du chunk
+
     while (1) {
         // Lire un chunk du fichier
         size_t bytes_read = fread(buffer, 1, CHUNK_SIZE, file);
         if (bytes_read == 0) {
             break; // Fin du fichier
         }
+
         // Calculer le MD5 du chunk lu
         compute_md5(buffer, md5);
-        // Check si le chunk est déja connu
+
+        // Ajouter le chunk dans la table globale (il ne sera ajouté que si c'est un nouveau chunk)
         add_to_global_tables(buffer, md5);
-        // Chercher l'indice du chunk dans la table de hachage
+
+        // Trouver l'indice du chunk dans la table globale
         int index = find_md5(global_hash_table, md5);
+
+        // Ajouter l'indice du chunk au tableau
         chunk_indices[*chunk_count] = index;
         (*chunk_count)++;
     }
+
     fclose(file);
 }
 
 
-void compute_md5(unsigned char *data, unsigned char *md5) {
 
-    MD5_CTX context;    // Structure pour l'état de calcul du MD5
-    MD5_Init(&context); // Initialiser le contexte
+// Fonction pour calculer le MD5 d'un chunk et le convertir en chaîne hexadécimale
+void compute_md5(unsigned char *data, char *md5_hex) {
+    MD5_CTX context;          // Structure pour l'état de calcul du MD5
+    MD5_Init(&context);       // Initialiser le contexte
+    
     // Calculer le MD5 du chunk
     MD5_Update(&context, data, CHUNK_SIZE);
-    // Obtenir le résultat du calcul MD5 dans le tableau md5
-    MD5_Final(md5, &context);
+    
+    unsigned char md5[MD5_DIGEST_LENGTH];    // Tableau pour stocker le résultat MD5 binaire
+    MD5_Final(md5, &context); // Finaliser le calcul MD5
+    
+    // Convertir le résultat binaire en chaîne hexadécimale
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+        // Format hexadécimal à deux chiffres, puis copie dans md5_hex
+        sprintf(&md5_hex[i * 2], "%02x", md5[i]);
+    }
 }
 
 
-int find_md5(Md5Entry *hash_table, unsigned char *md5) {
 
+int find_md5(Md5Entry *hash_table, unsigned char *md5) {
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
         if (memcmp(hash_table[i].md5, md5, MD5_DIGEST_LENGTH) == 0) {
             return hash_table[i].index;
@@ -168,6 +212,7 @@ int find_md5(Md5Entry *hash_table, unsigned char *md5) {
     }
     return -1;
 }
+
 
 
 void undeduplicate(const char *input_filename, const char *output_filename) {
