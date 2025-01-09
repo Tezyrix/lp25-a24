@@ -69,6 +69,14 @@ void initialize_global_tables();
  */
 void add_to_global_tables(void *data, unsigned char *md5);
 
+
+/**
+ * @brief Sauvegarde les tables globales.
+ */
+void save_global_tables_to_files();
+
+
+
 /**
  * @brief Ferme les tables globales après leur utilisation.
  *

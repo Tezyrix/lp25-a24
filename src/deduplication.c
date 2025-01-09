@@ -184,7 +184,7 @@ void deduplicate_file(const char *file_path, int *chunk_indices, int *chunk_coun
 
 
 
-// Fonction pour calculer le MD5 d'un chunk et le convertir en chaîne hexadécimale
+
 void compute_md5(unsigned char *data, char *md5_hex) {
     MD5_CTX context;          // Structure pour l'état de calcul du MD5
     MD5_Init(&context);       // Initialiser le contexte

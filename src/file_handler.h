@@ -38,6 +38,16 @@ int compare_file_with_backup_log(const char *path, log_t *logs, const char *back
  * @param backup_dir Le répertoire de destination où la sauvegarde a été effectuée.
  */
 void generate_backup_log(const char *source_dir, const char *basename, FILE *log);
+
+
+/**
+ * @brief Affiche les logs présents dans la structure de logs.
+ *
+ * Cette fonction parcourt et affiche toutes les entrées de logs dans la structure `logs`.
+ *
+ * @param logs La structure contenant les logs à afficher.
+ */
 void display_logs(const log_t *logs);
+
 
 #endif // FILE_HANDLER_H
